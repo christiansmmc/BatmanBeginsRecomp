@@ -1,0 +1,2 @@
+# no input: the game runs on its own (a script with one far-off press keeps port 0 connected)
+999999 START 1

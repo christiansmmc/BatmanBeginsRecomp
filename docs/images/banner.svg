@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-label="Batman Begins Recomp">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16181b"/>
+      <stop offset="1" stop-color="#050506"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c8961e" stop-opacity="0.0"/>
+      <stop offset="0.1" stop-color="#c8961e" stop-opacity="0.8"/>
+      <stop offset="0.28" stop-color="#1c1607" stop-opacity="0.95"/>
+      <stop offset="0.72" stop-color="#1c1607" stop-opacity="0.95"/>
+      <stop offset="0.9" stop-color="#c8961e" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#c8961e" stop-opacity="0.0"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9a8"/>
+      <stop offset="0.55" stop-color="#e2b33c"/>
+      <stop offset="1" stop-color="#9c6f12"/>
+    </linearGradient>
+    <pattern id="lines" width="6" height="5" patternUnits="userSpaceOnUse">
+      <rect width="6" height="2" fill="#000" fill-opacity="0.28"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="320" fill="url(#night)"/>
+  <polygon points="0,96 1000,96 1040,58 1280,58 1280,262 560,262 520,300 0,300" fill="url(#band)"/>
+  <polygon points="0,96 1000,96 1040,58 1280,58 1280,262 560,262 520,300 0,300" fill="url(#lines)"/>
+  <polyline points="0,96 1000,96 1040,58 1280,58" fill="none" stroke="#b6c9bb" stroke-opacity="0.55" stroke-width="1.5"/>
+  <polyline points="0,300 520,300 560,262 1280,262" fill="none" stroke="#b6c9bb" stroke-opacity="0.55" stroke-width="1.5"/>
+  <text x="640" y="182" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="74" font-weight="700" letter-spacing="10" fill="url(#gold)" stroke="#120d03" stroke-width="3" paint-order="stroke">BATMAN BEGINS</text>
+  <text x="640" y="236" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="30" font-weight="600" letter-spacing="22" fill="#f4f1dc">RECOMP</text>
+  <text x="640" y="40" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="17" letter-spacing="5" fill="#9aa59f">ORIGINAL XBOX  ·  STATIC RECOMPILATION  ·  NATIVE WINDOWS</text>
+</svg>
