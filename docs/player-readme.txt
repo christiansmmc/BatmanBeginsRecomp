@@ -1,7 +1,8 @@
 BATMAN BEGINS ON PC
 
-The original Xbox game, recompiled to run directly on Windows. It uses the US ISO of
-the game, which is already in the assets folder. There is nothing to install.
+The original Xbox game, recompiled to run directly on Windows. It runs your own copy
+of the game: the US ISO, or the files extracted from it, in the assets folder. There
+is nothing to install.
 
 The whole campaign has been played to the end with this version, at 60 FPS. Defects
 can still show up.
@@ -9,8 +10,16 @@ can still show up.
 
 HOW TO START
 
-Double-click BatmanBegins.exe. The logos take about 45 seconds, less if you skip
-them, and then the PRESS START screen appears.
+Put the game's ISO in the assets folder, if it is not there yet, and double-click
+BatmanBegins.exe.
+
+The first time, if this folder does not have the game's code yet, a window prepares
+it for your PC. This only happens once and takes from under a minute to a few
+minutes, depending on the PC. If you close it, the next start carries on where it
+stopped. When it says "The game is ready", press Start.
+
+The logos take about 45 seconds, less if you skip them, and then the PRESS START
+screen appears.
 
 To quit, use Alt+F4. Before quitting, pause the game and use Save / Quit, then Save
 Last Checkpoint. The save goes back to the last checkpoint, not to the exact spot
@@ -75,7 +84,9 @@ folder.
   shaders.cache   Effects already prepared, so the game does not stutter the
                   first time it shows them. If it is deleted, the game makes
                   a new one
-  assets          The game's ISO
+  assets          The game's ISO, or its extracted files
+  compiler        What prepares the game's code on the first start. The
+                  window that says "The game is ready" offers to delete it
 
 If settings.toml has an error, the game starts with the default options and keeps a
 copy of it as settings.toml.bad.

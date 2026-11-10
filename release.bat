@@ -16,9 +16,15 @@ del /q "%GAME_EXE%.zip" 2>nul
 rem an empty assets folder beside the exe, where the game (files or .iso) goes
 rd /s /q "%OUT%\release" 2>nul
 mkdir "%OUT%\release\assets"
+echo Put the US ISO of Batman Begins for Xbox here, or the files extracted from it.> "%OUT%\release\assets\Put the game here.txt"
+rem the player's readme, and the licences of this project and of the fonts inside the exe
+copy /y docs\player-readme.txt "%OUT%\release\README.txt" >nul
+rem the exe that ships is a copy with the project's own icon: the build's icon is made from the game's title image
+copy /y "%OUT%\%GAME_EXE%.exe" "%OUT%\release\" >nul
+python tools\release_icon.py "%OUT%\release\%GAME_EXE%.exe" || exit /b 1
 rem only the runtime DLLs the executables import; xbe_recomp.exe needs its own copy, Windows only looks beside the
 rem exe it starts
 del /q "%OUT%\compiler\*.dll" 2>nul
 for %%f in (msvcp140 vcruntime140) do copy /y "%VCRUNTIME%\%%f.dll" "%OUT%\compiler\" >nul
 rem the compiler folder without its work folder: no game code goes in the zip, the first start builds it
-7z a "%GAME_EXE%.zip" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" .\README.md "%SDK%\THIRD_PARTY.txt" "%VCRUNTIME%\msvcp140.dll" "%VCRUNTIME%\vcruntime140.dll" "%VCRUNTIME%\vcruntime140_1.dll" -xr!work
+7z a "%GAME_EXE%.zip" ".\%OUT%\release\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" ".\%OUT%\release\README.txt" .\LICENSE ".\%OUT%\OFL-Michroma.txt" ".\%OUT%\OFL-BarlowSemiCondensed.txt" "%SDK%\THIRD_PARTY.txt" "%VCRUNTIME%\msvcp140.dll" "%VCRUNTIME%\vcruntime140.dll" "%VCRUNTIME%\vcruntime140_1.dll" -xr!work

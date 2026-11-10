@@ -18,15 +18,31 @@ Built with the [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) tool 
 
 ## Contents
 
+- [Installation](#installation)
 - [Status](#status)
 - [Features](#features)
 - [Default controls](#default-controls)
 - [System requirements](#system-requirements)
-- [Building](#building)
+- [Building from source](#building-from-source)
 - [FAQ](#faq)
 - [How it works](#how-it-works)
 - [Credits](#credits)
 - [License](#license)
+
+## Installation
+
+1. Download `BatmanBegins.zip` from the [latest release](https://github.com/christiansmmc/BatmanBeginsRecomp/releases/latest) and extract it anywhere.
+2. Put your ISO of the US release in the `assets` folder. The files extracted from the disc work too.
+3. Run `BatmanBegins.exe`.
+
+The first start prepares the game's code for your PC, behind a small progress window: it recompiles the game from your copy. This happens only once: it took about 20 seconds on the test PC, which compiles 16 files at a time, and a PC with fewer cores takes a few minutes. If you close the window, the next start carries on where it stopped. When it says **The game is ready**, press Start. The same window offers to delete the compiler files, which are only needed for this step.
+
+> [!NOTE]
+> The download holds no game code or assets: the program builds the game's code from your copy, on your PC.
+
+The download has no shader cache, since it would be made from the game: the first time each effect appears, the game may stall for a moment while it compiles its shaders, and after that they are kept on disk.
+
+Settings, saves and logs are kept next to the program. The `README.txt` in the download explains the controls, the options screen and where everything is.
 
 ## Status
 
@@ -93,13 +109,13 @@ All of these are on the in-game options screen, which opens with <kbd>Esc</kbd>,
 - **CPU**: x86-64 with SSE4.2 and POPCNT (x86-64-v2).
 - **GPU**: Direct3D 12.
 - **Game**: the US release of Batman Begins for the original Xbox, as an ISO image. Other releases are refused at start with a message.
-- **Storage**: about 10 GB for the ISO, the extracted game files and the build, plus 7.5 GB more for a portable folder, which carries its own copy of the ISO.
+- **Storage**: about 8.5 GB for the release with the ISO in it and the game's code it builds. Building from source takes about 10 GB, plus 7.5 GB more for a portable folder, which carries its own copy of the ISO.
 
 Tested on one PC, with an NVIDIA GeForce RTX 4070 Ti and a 2560x1440 monitor at 164 Hz.
 
-## Building
+## Building from source
 
-There are no prebuilt downloads: the recompiled code is derived from the game itself, so it is built from your own copy.
+Only needed to change the code: the [release](#installation) needs none of this.
 
 ### 1. Clone the repository
 
@@ -114,6 +130,7 @@ cd BatmanBeginsRecomp
   - Desktop development with C++
   - C++ Clang tools for Windows
   - C++ CMake tools for Windows
+- [Git](https://git-scm.com/download/win), which the build also uses to fetch SDL, Dear ImGui, toml++ and Zydis.
 - [Python](https://www.python.org/downloads/) 3.10 or newer, for the helper scripts.
 
 > [!TIP]
@@ -131,7 +148,7 @@ The tool only reads the image and never writes to it.
 
 ### 4. Build
 
-Run `build.bat`. The first build recompiles the whole game and takes 30 to 90 minutes, depending on the machine. Later builds only rebuild what changed.
+Run `build.bat`. The first build also fetches and compiles the libraries, then recompiles the whole game; it takes a few minutes, depending on the machine. Later builds only rebuild what changed.
 
 You can play straight from `out\build\release\BatmanBegins.exe`, which finds the `assets` folder in the repository.
 
@@ -141,7 +158,11 @@ You can play straight from `out\build\release\BatmanBegins.exe`, which finds the
 python tools/make_dist.py
 ```
 
-This writes `dist\Batman Begins`: the program, its runtime libraries, licences, a player README and your ISO, copied and checked. The folder runs on its own, anywhere. Running it again over an existing folder replaces the program and keeps the saves, logs, settings and shader cache.
+This writes `dist\Batman Begins`: the program, its runtime libraries, licences, a player README and your ISO, copied and checked. It looks for `Batman Begins (USA).iso` in the repository's root; for another name or place, pass `--iso <path>`. The folder runs on its own, anywhere. Running it again over an existing folder replaces the program and keeps the saves, logs, settings and shader cache.
+
+### Make a release zip (optional)
+
+`release.bat` writes `BatmanBegins.zip`, the download described under [Installation](#installation): the program, the compiler that builds the game's code on the first start, and an empty `assets` folder. It never contains game code. The program in it gets the project's own icon (`tools/release_icon.py`), because the build's icon is made from the game's title image. It needs [7-Zip](https://www.7-zip.org/) on the PATH.
 
 ### Tests
 
