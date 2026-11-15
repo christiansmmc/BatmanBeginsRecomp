@@ -27,6 +27,23 @@ struct Image {
 
 enum class Lookup { None, Loading, Ready };
 
+// The game drawing over some of the console's textures itself, as the key prompts do: a picture made from the console's own
+// pixels, as often as it changes. A file of the same key in the texture pack goes first. The functions are called on the
+// render thread.
+struct Overlay {
+    // can a texture of this size be one the game draws over; keeps the bytes of every other from being hashed
+    bool (*wants_size)(uint32_t width, uint32_t height);
+    // `bgra` is level 0 of the texture with key `key`, B G R A, rows tightly packed. Change it, and the size when the picture
+    // is made bigger; false leaves the console's.
+    bool (*paint)(uint64_t key, uint32_t& width, uint32_t& height, std::vector<uint8_t>& bgra);
+    // a number that changes whenever what paint draws does; every texture is made again
+    uint32_t (*revision)();
+};
+void SetOverlay(const Overlay& overlay);  // once, before the first draw
+
+// the picture paint makes for a texture's bytes, kept for Take; true when there is one
+bool MakeOverlay(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette);
+
 // latches the texture settings, the render thread's, and lists the pack again once its files changed.
 // true then: every pack image loads anew, GPU copies made before are stale
 bool Update();

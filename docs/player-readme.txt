@@ -32,6 +32,15 @@ CONTROLS
 A controller connected to the PC works without any setup. The keyboard always works
 as player 1, with or without a controller.
 
+Button pictures in the game (A, B, X, Y, the triggers, black and white, BACK, START) show your keys
+while the keyboard or mouse was used last, and the console's buttons after the controller.
+They follow what you rebind. pc_prompts = false in settings.toml keeps the console's.
+
+The mouse looks around while the game window is in front and the options screen is
+closed. Its buttons can be chosen for any action on the KEYBOARD tab: click the row,
+then the button. Speed is mouse_sensitivity in settings.toml; invert X/Y on the MOUSE tab
+(or via mouse_invert_x and mouse_invert_y, both true by default), and mouse_look = false leaves the mouse alone.
+
 The game shows the Xbox controller's buttons. On the keyboard, the defaults are:
 
   Move: W, A, S, D                Camera: I, J, K, L

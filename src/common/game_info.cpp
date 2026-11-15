@@ -13,7 +13,9 @@
 
 #include "app/app.h"
 #include "common/fps_policy.h"
+#include "common/key_prompts.h"
 #include "common/keyboard_pad.h"
+#include "common/mouse_look.h"
 #include "common/options_screen.h"
 #include "common/pad_script.h"
 #include "core/input.h"
@@ -37,6 +39,10 @@ uint32_t MonitorRefreshHz() {
 void LoadMore(const void* table) {
     const toml::table& t = *static_cast<const toml::table*>(table);
     g_play_rate.Load(t["experimental_play_fps"].value_or(uint32_t{0}));
+    // mouse_look = false leaves the mouse to the desktop; mouse_sensitivity is degrees of turn per mouse count
+    mouse::Configure(t["mouse_look"].value_or(true), t["mouse_sensitivity"].value_or(0.08), t["mouse_invert_x"].value_or(true), t["mouse_invert_y"].value_or(true));
+    // pc_prompts = false keeps the console's button pictures; on, they show the player's keys while the keyboard is in use
+    prompts::Configure(t["pc_prompts"].value_or(true));
     options::LoadSettings(table);
 }
 
@@ -46,12 +52,18 @@ void SaveMore(void* table) {
     toml::table& t = *static_cast<toml::table*>(table);
     if (const uint32_t fps = g_play_rate.Chosen()) t.insert_or_assign("experimental_play_fps", int64_t(fps));
     t.insert_or_assign("fps_cap", int64_t(g_fps_cap_in_file));
+    t.insert_or_assign("mouse_look", mouse::Enabled());
+    t.insert_or_assign("mouse_sensitivity", double(mouse::DegreesPerCount()));
+    t.insert_or_assign("mouse_invert_x", mouse::InvertX());
+    t.insert_or_assign("mouse_invert_y", mouse::InvertY());
+    t.insert_or_assign("pc_prompts", prompts::Enabled());
     options::SaveSettings(table);
 }
 
 void Init() {
     app::Settings& settings = app::Get();
     g_fps_cap_in_file = settings.fps_cap;
+    prompts::Init();
     settings.fps_cap = EffectiveFpsCap(settings.fps_cap, MonitorRefreshHz(), kMaxValidatedFps);
     LOGI("fps cap %u", settings.fps_cap);
     try {
@@ -62,22 +74,34 @@ void Init() {
     }
 }
 
-void WindowUp(void*) { options::LoadFonts(); }
+void WindowUp(void* hwnd) {
+    options::LoadFonts();
+    mouse::Init(hwnd);
+}
 
 void Ui(double) {
     CountPresentedFrame();
+    mouse::Sync();
     options::DrawScreen();
 }
 
 void Pad(int port, input::Pad& pad) {
     ApplyPadScript(port, pad);
+    if (pad.connected && prompts::ControllerInUse(pad.buttons, pad.analog, pad.lx, pad.ly, pad.rx, pad.ry)) prompts::NoteController();
     options::SeeController(port, pad);
     ApplyWindowKeyboard(port, pad);
     options::GateReport(port, pad);
 }
 
-bool Message(void*, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t*) {
-    KeyboardWindowMessage(message, wp, lp);
+bool Message(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t*) {
+    mouse::OnWindowMessage(hwnd, message, wp, lp);
+    bool button_down = false;
+    if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || (MouseButtonOfMessage(message, wp, &button_down), button_down)) {
+        prompts::NoteKeyboard();
+    }
+    // the mouse's buttons are the game's only while it has the mouse: a click that brings the window forward, or one on
+    // the options screen, does not punch
+    if (!MouseButtonOfMessage(message, wp, nullptr) || mouse::Capturing()) KeyboardWindowMessage(message, wp, lp);
     options::OnWindowMessage(message, wp, lp);
     return false;
 }

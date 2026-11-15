@@ -8,6 +8,7 @@
 #include "app/app.h"
 #include "common/fps_policy.h"
 #include "common/frame_step.h"
+#include "common/mouse_look.h"
 #include "core/log.h"
 #include "cpu/x86_context.h"
 #include "kernel/kernel.h"
@@ -53,6 +54,12 @@ void AddBefore(X86Context& ctx, int reg, float step) {
 
 // a rate above the shipped one was asked for
 bool g_above_shipped = false;
+
+constexpr uint32_t kCameraYawGain = 0x864, kCameraPitchGain = 0x868;  // camera fields: what the stick is multiplied by
+constexpr uint32_t kSlowMotion = 0x30FF90;  // EXBaseApp::m_GameRenderFrameRateMul, 1 in play
+float GuestFloat(uint32_t address) { return std::bit_cast<float>(kernel::R32(address)); }
+
+mouse::Aim g_mouse_aim;  // the title's thread
 
 // whether a frame counter tuned at the shipped rate counts this frame
 CounterClock g_counters;
@@ -163,4 +170,23 @@ void FrameRateFromBlanks(X86Context& ctx, uint8_t*) {
     if (rate < lowest) rate = lowest;
     kernel::W32(ctx.esp + 0x10, std::bit_cast<uint32_t>(rate));
     g_counters.Frame(rate);
+}
+
+// before 0x33D97 in the camera's input function (0x33A70, called by the four camera modes that take the stick, from 0x27193,
+// 0x27F93, 0x288F8 and 0x37116). The right stick is in xmm2 (x, positive to the right) and xmm1 (y, negative upwards), and
+// the function is about to turn them into this frame's turn. With the mouse they are changed so that the turn is the angle
+// the mouse travelled; the function's own checks after this point, the camera being locked or returning behind the hero,
+// still decide whether it is used. docs/TECHNICAL.md, "Mouse look".
+void MouseLookCamera(X86Context& ctx, uint8_t*) {
+    const mouse::Motion motion = mouse::TakeMotion();
+    if (!motion.active) {
+        g_mouse_aim.Reset();
+        return;
+    }
+    const mouse::CameraTerms terms{GuestFloat(ctx.esi + kCameraYawGain), GuestFloat(ctx.esi + kCameraPitchGain),
+                                   GuestFloat(kSlowMotion)};
+    const mouse::Sticks stick = g_mouse_aim.Apply({ctx.xmm[2].f[0], ctx.xmm[1].f[0]}, float(motion.dx), float(motion.dy), terms,
+                                                  mouse::CurrentTuning());
+    ctx.xmm[2].f[0] = stick.x;
+    ctx.xmm[1].f[0] = stick.y;
 }

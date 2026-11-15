@@ -30,6 +30,7 @@
 
 #include "app/app.h"
 #include "core/log.h"
+#include "gpu/bc_decode.h"
 #include "gpu/shaders.h"
 
 using Microsoft::WRL::ComPtr;
@@ -76,6 +77,9 @@ struct Pack {
     std::unordered_set<uint64_t> asked;
     std::unordered_map<uint64_t, std::optional<Image>> loaded;  // empty: the file did not load
     std::unordered_set<uint64_t> dumped;
+    Overlay overlay{};
+    uint32_t overlay_revision = 0;
+    std::unordered_map<uint64_t, Image> made;  // what the overlay painted; the render thread's
 };
 
 Pack g;
@@ -545,16 +549,26 @@ bool UpdatePackFiles() {
 bool Update() {
     bool changed = LatchSettings();
     bool reloaded = g.set.replacing && UpdatePackFiles();
-    if (changed || reloaded) g.generation++;
-    return reloaded;
+    bool repainted = false;
+    if (g.overlay.revision) {
+        const uint32_t revision = g.overlay.revision();
+        repainted = revision != g.overlay_revision;
+        g.overlay_revision = revision;
+        if (repainted) g.made.clear();
+    }
+    if (changed || reloaded || repainted) g.generation++;
+    return reloaded || repainted;
 }
+
+void SetOverlay(const Overlay& overlay) { g.overlay = overlay; }
 
 uint32_t Generation() { return g.generation; }
 
 bool Replacing() { return g.set.replacing && !g.files.empty(); }
 
 uint64_t Key(const TextureDesc& d, const FormatInfo& fi, const uint8_t* guest, const uint32_t* palette) {
-    if (!Replacing() && !g.set.dumping) return 0;
+    const bool overlaid = g.overlay.wants_size && g.overlay.wants_size(d.width, d.height);
+    if (!Replacing() && !g.set.dumping && !overlaid) return 0;
     // cube maps, volumes and depth stay the console's; linear ones are movie frames and the game's own copies
     if (d.cube || d.depth > 1 || d.linear || UploadFormat(fi.host) == DXGI_FORMAT_UNKNOWN) return 0;
     uint32_t shape[] = {d.format, d.width, d.height};
@@ -580,9 +594,50 @@ void Dump(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32
     });
 }
 
+bool MakeOverlay(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {
+    if (!key || !g.overlay.paint || !g.overlay.wants_size || !g.overlay.wants_size(d.width, d.height)) return false;
+    if (g.set.replacing && g.files.count(key)) return false;  // the pack's own image
+    if (g.made.count(key)) return true;
+    const Image console = Decode(d, guest, palette);
+    if (console.levels.empty()) return false;
+    const Level& top = console.levels[0];
+    std::vector<uint8_t> bgra;
+    switch (console.format) {
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+            bgra.resize(size_t(d.width) * d.height * 4);
+            for (uint32_t y = 0; y < d.height; y++) {
+                std::memcpy(&bgra[size_t(y) * d.width * 4], &top.px[size_t(y) * top.pitch], size_t(d.width) * 4);
+            }
+            break;
+        case DXGI_FORMAT_BC1_UNORM: bgra = DecodeBcToBgra(Bc::Bc1, d.width, d.height, top.px.data()); break;
+        case DXGI_FORMAT_BC2_UNORM: bgra = DecodeBcToBgra(Bc::Bc2, d.width, d.height, top.px.data()); break;
+        case DXGI_FORMAT_BC3_UNORM: bgra = DecodeBcToBgra(Bc::Bc3, d.width, d.height, top.px.data()); break;
+        default: return false;
+    }
+    uint32_t width = d.width, height = d.height;
+    if (!g.overlay.paint(key, width, height, bgra) || !width || !height || width > kMaxSide || height > kMaxSide ||
+        bgra.size() != size_t(width) * height * 4) {
+        return false;
+    }
+    Image img;
+    img.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    img.width = width;
+    img.height = height;
+    img.levels.push_back({std::move(bgra), width * 4});
+    AddMipmaps(img);
+    g.made.emplace(key, std::move(img));
+    return true;
+}
+
 Lookup Take(uint64_t key, Image& out) {
     auto file = g.files.find(key);
-    if (!g.set.replacing || file == g.files.end()) return Lookup::None;
+    if (!g.set.replacing || file == g.files.end()) {
+        auto made = g.made.find(key);
+        if (made == g.made.end()) return Lookup::None;
+        out = std::move(made->second);
+        g.made.erase(made);
+        return Lookup::Ready;
+    }
     uint32_t revision = 0;
     {
         std::lock_guard l(g.lock);

@@ -494,3 +494,8 @@ call = "EnemyAlertGain"
 [[hook]]
 at = 0x66D5B
 call = "AreaFearDrain"
+
+# the mouse turns the camera: see MouseLookCamera in src/game/hooks.cpp, src/common/mouse_look.cpp
+[[hook]]
+at = 0x33D97  # the camera's input function has read the right stick into xmm2 (x) and xmm1 (y)
+call = "MouseLookCamera"
