@@ -11,7 +11,7 @@ namespace options {
 
 namespace {
 
-constexpr uint32_t kFirstScale = 2, kLastScale = 4;  // the ones validated: docs/TECHNICAL.md, "Options screen"
+constexpr uint32_t kFirstScale = 2, kLastScale = 8;  // the ones validated: docs/TECHNICAL.md, "Options screen"
 constexpr uint32_t kWindowPercent = 100;
 
 constexpr uint32_t kVkEscape = 0x1B, kVkF3 = 0x72, kVkLeftWindows = 0x5B, kVkRightWindows = 0x5C;

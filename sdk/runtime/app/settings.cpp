@@ -51,6 +51,7 @@ void Load() {
     s.fps_cap = t["fps_cap"].value_or(s.fps_cap);
     s.vsync = t["vsync"].value_or(s.vsync);
     s.aniso = t["anisotropic_filtering"].value_or(s.aniso);
+    s.downsample_filter = std::min(t["downsample_filter"].value_or(s.downsample_filter), 4u);
     std::string aspect = t["aspect"].value_or(std::string(kAspects[uint32_t(s.aspect)]));
     for (uint32_t i = 0; i < 3; i++)
         if (aspect == kAspects[i]) s.aspect = Aspect(i);
@@ -76,6 +77,7 @@ toml::table Table() {
                   {"fps_cap", int64_t(s.fps_cap)},
                   {"vsync", s.vsync},
                   {"anisotropic_filtering", int64_t(s.aniso)},
+                  {"downsample_filter", int64_t(s.downsample_filter)},
                   {"aspect", kAspects[uint32_t(s.aspect)]},
                   {"custom_textures", s.custom_textures},
                   {"dump_textures", s.dump_textures},

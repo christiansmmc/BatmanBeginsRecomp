@@ -23,6 +23,7 @@ struct Settings {
     uint32_t render_percent = 100;   // of the output height
     uint32_t fps_cap = 60;           // 0 unlimited, kFpsCapRefresh the monitor's refresh rate
     bool vsync = true;
+    uint32_t downsample_filter = 0; // 0 bilinear, 1 bicubic, 2 Lanczos3, 3 box, 4 area weighted
     uint32_t aniso = 0;              // 0 as the game asks
     Aspect aspect = Aspect::Auto;    // the picture's shape
     bool custom_textures = true;     // images in textures\replacement\ beside the exe replace the game's

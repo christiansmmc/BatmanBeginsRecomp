@@ -299,11 +299,12 @@ void PadButton(float x, float y, ImU32 light, ImU32 mid, ImU32 dark, const char*
 // ---- the screen's state, under app::UiLock ----
 
 enum class Tab { Video, Keyboard };
-enum VideoRow { kRowMode, kRowSize, kRowScale, kRowAspect, kRowFilter, kRowVsync, kRowFrameRate, kVideoRows };
+enum VideoRow { kRowMode, kRowSize, kRowScale, kRowAspect, kRowFilter, kRowDownsample, kRowVsync, kRowFrameRate, kVideoRows };
 enum class Device { Keyboard, Controller };
 
 constexpr float kRowsTop = 148.0f, kRowHeight = 52.0f;
 constexpr int kVisibleRows = 7;
+constexpr float kVideoRowHeight = 46.0f; // eight video options in the same space
 
 struct KeyRow {
     Action action;
@@ -478,6 +479,9 @@ void ChangeValue(int row, int delta) {
             s.aniso = kFilters[((index + delta) % int(std::size(kFilters)) + int(std::size(kFilters))) % int(std::size(kFilters))];
             break;
         }
+        case kRowDownsample:
+            s.downsample_filter = (s.downsample_filter + 5 + delta) % 5;
+            break;
         case kRowVsync:
             s.vsync = !s.vsync;
             break;
@@ -628,7 +632,7 @@ void HandleMouse() {
     }
 
     if (x < 330.0f || x > 1090.0f || y < kRowsTop) return;
-    const int shown = int((y - kRowsTop) / kRowHeight);
+    const int shown = int((y - kRowsTop) / (ui.tab == Tab::Video ? kVideoRowHeight : kRowHeight));
     if (ui.tab == Tab::Video) {
         if (shown >= kVideoRows) return;
         if (moved) ui.video_row = shown;
@@ -710,8 +714,8 @@ void DrawArrow(float x, float y, bool to_left, ImU32 color) {
     else c.list->AddTriangleFilled(c.At(x, y), c.At(x + kWidth, y + kHeight / 2.0f), c.At(x, y + kHeight), color);
 }
 
-void DrawRowBase(int shown, bool selected, bool last) {
-    const float top = kRowsTop + float(shown) * kRowHeight;
+void DrawRowBase(int shown, bool selected, bool last, float height = kRowHeight) {
+    const float top = kRowsTop + float(shown) * height;
     const Canvas& c = g_canvas;
     if (selected) {
         std::vector<float> breaks = {c.ref_left, c.ref_right};
@@ -721,15 +725,15 @@ void DrawRowBase(int shown, bool selected, bool last) {
         for (size_t i = 1; i < breaks.size(); i++) {
             const ImU32 c0 = Sample(kSelectedAcross, int(std::size(kSelectedAcross)), breaks[i - 1]);
             const ImU32 c1 = Sample(kSelectedAcross, int(std::size(kSelectedAcross)), breaks[i]);
-            c.list->AddRectFilledMultiColor(c.At(breaks[i - 1], top), c.At(breaks[i], top + kRowHeight), c0, c1, c1, c0);
+            c.list->AddRectFilledMultiColor(c.At(breaks[i - 1], top), c.At(breaks[i], top + height), c0, c1, c1, c0);
         }
         Rect(c.ref_left, top, c.ref_right, top + 1.0f, kGold);
-        Rect(c.ref_left, top + kRowHeight - 1.0f, c.ref_right, top + kRowHeight, kGold);
+        Rect(c.ref_left, top + height - 1.0f, c.ref_right, top + height, kGold);
         // the slanted marker left of the name
         const ImVec2 marker[4] = {c.At(318.0f + 6.0f, top + 18.0f), c.At(318.0f + 15.0f, top + 18.0f), c.At(318.0f + 9.0f, top + 34.0f), c.At(318.0f, top + 34.0f)};
         c.list->AddConvexPolyFilled(marker, 4, kGold);
     } else if (!last) {
-        Rect(344.0f, top + kRowHeight - 1.0f, 1080.0f, top + kRowHeight, Rgb(0x8C9E93, 0.20f));
+        Rect(344.0f, top + height - 1.0f, 1080.0f, top + height, Rgb(0x8C9E93, 0.20f));
     }
 }
 
@@ -755,6 +759,10 @@ std::string ValueOf(int row) {
             return {};
         case kRowAspect: return app::Widescreen() ? "16:9" : "4:3";
         case kRowFilter: return s.aniso ? std::to_string(s.aniso) + "x" : "OFF";
+        case kRowDownsample: {
+            static constexpr const char* names[] = {"BILINEAR", "BICUBIC", "LANCZOS3", "AREA / BOX", "AREA WEIGHTED"};
+            return names[std::min(s.downsample_filter, 4u)];
+        }
         case kRowVsync: return s.vsync ? "ON" : "OFF";
         case kRowFrameRate: return g_play_rate.Chosen() == kExperimentalPlayFps ? "60 · EXPERIMENTAL" : "30";
         default: return {};
@@ -772,6 +780,7 @@ const char* DescriptionOf(int row) {
         case kRowScale: return "Multiplies the resolution: sharper, but slower. Changes when this screen closes.";
         case kRowAspect: return "Affects the picture and the next saves. Takes effect when this screen closes.";
         case kRowFilter: return "Sharpens textures seen at an angle. Off is the game's own filter.";
+        case kRowDownsample: return "Final SSAA downsampling filter. Applies immediately.";
         case kRowVsync: return "Prevents screen tearing by syncing with the monitor. Does not change the speed.";
         case kRowFrameRate:
             if (g_play_rate.Chosen() == kExperimentalPlayFps)
@@ -787,15 +796,15 @@ void DrawVideoRows() {
     const ScreenState& ui = g_screen;
     for (int row = 0; row < kVideoRows; row++) {
         const bool selected = row == ui.video_row;
-        const float top = kRowsTop + float(row) * kRowHeight;
-        DrawRowBase(row, selected, row == kVideoRows - 1);
-        static constexpr const char* kLabels[kVideoRows] = {"DISPLAY MODE", "WINDOW SIZE", "INTERNAL RESOLUTION", "ASPECT RATIO", "TEXTURE FILTER", "VSYNC", "FRAME RATE"};
-        Text(g_body, 17.0f, 344.0f, top, kRowHeight, selected ? kBright : kGold, kLabels[row], 0.05f);
-        ValueCentred(910.0f, top, kRowHeight, selected ? kBright : kGold, ValueOf(row));
+        const float top = kRowsTop + float(row) * kVideoRowHeight;
+        DrawRowBase(row, selected, row == kVideoRows - 1, kVideoRowHeight);
+        static constexpr const char* kLabels[kVideoRows] = {"DISPLAY MODE", "WINDOW SIZE", "INTERNAL RESOLUTION", "ASPECT RATIO", "TEXTURE FILTER", "SSAA FILTER", "VSYNC", "FRAME RATE"};
+        Text(g_body, 17.0f, 344.0f, top, kVideoRowHeight, selected ? kBright : kGold, kLabels[row], 0.05f);
+        ValueCentred(910.0f, top, kVideoRowHeight, selected ? kBright : kGold, ValueOf(row));
         if (RowHasArrows(row)) {
             const ImU32 arrow = selected ? kGold : kArrow;
-            DrawArrow(kArrowLeft, top + 18.0f, true, arrow);
-            DrawArrow(kArrowRight, top + 18.0f, false, arrow);
+            DrawArrow(kArrowLeft, top + 15.0f, true, arrow);
+            DrawArrow(kArrowRight, top + 15.0f, false, arrow);
         }
     }
 }

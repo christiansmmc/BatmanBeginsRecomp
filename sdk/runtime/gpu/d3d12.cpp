@@ -154,6 +154,107 @@ float4 psmain(O i) : SV_Target {
 }
 )";
 
+// Final-frame downsampling only. The general-purpose blit shader is unchanged.
+// Modes are selected once at startup via BB_DOWNSAMPLE_FILTER.
+const char* kFinalDownsampleHlsl = R"(
+cbuffer B : register(b1) { float4 uvrect; float4 opts; };
+Texture2D img : register(t0);
+Texture2D lut : register(t1);
+SamplerState linearSampler : register(s0);
+SamplerState pointSampler : register(s1);
+struct O { float4 p : SV_Position; float2 uv : TEXCOORD0; };
+O vs(uint id : SV_VertexID) {
+    O o;
+    float2 t = float2((id << 1) & 2, id & 2);
+    o.p = float4(t * float2(2, -2) + float2(-1, 1), 0, 1);
+    o.uv = uvrect.xy + t * uvrect.zw;
+    return o;
+}
+float sinc(float x) {
+    x = abs(x);
+    return x < 0.0001 ? 1.0 : sin(3.14159265359 * x) / (3.14159265359 * x);
+}
+float weight(float x) {
+    x = abs(x);
+#ifdef FILTER_BICUBIC
+    // Mitchell-Netravali, B=C=1/3.
+    if (x < 1.0) return (7.0*x*x*x - 12.0*x*x + 5.3333333333) / 6.0;
+    if (x < 2.0) return (-2.3333333333*x*x*x + 12.0*x*x - 20.0*x + 10.6666666667) / 6.0;
+    return 0.0;
+#else
+    return x < 3.0 ? sinc(x) * sinc(x / 3.0) : 0.0;
+#endif
+}
+float4 psmain(O i) : SV_Target {
+    uint sw, sh;
+    img.GetDimensions(sw, sh);
+    float2 dims = float2(sw, sh);
+    float4 c = 0;
+#ifdef FILTER_AREA_WEIGHTED
+    // Exact area integration of the source pixel rectangles covered by one output pixel.
+    // Derivatives measure the source footprint, including aspect-ratio letterboxing.
+    float2 footprint = (abs(ddx(i.uv)) + abs(ddy(i.uv))) * dims;
+    float2 left = i.uv * dims - 0.5 * footprint;
+    float2 right = i.uv * dims + 0.5 * footprint;
+    int2 first = int2(floor(left));
+    int2 last = int2(ceil(right));
+    float total = 0.0;
+    // Hard cap protects against runaway work if a malformed footprint is supplied.
+    // The supported 2x-8x modes fit comfortably within this bound.
+    [loop] for (int y = 0; y < 16; ++y) {
+        int sy = first.y + y;
+        if (sy >= last.y) break;
+        float wy = max(0.0, min(right.y, float(sy + 1)) - max(left.y, float(sy)));
+        [loop] for (int x = 0; x < 16; ++x) {
+            int sx = first.x + x;
+            if (sx >= last.x) break;
+            float wx = max(0.0, min(right.x, float(sx + 1)) - max(left.x, float(sx)));
+            float w = wx * wy;
+            int2 texel = clamp(int2(sx, sy), int2(0, 0), int2(sw - 1, sh - 1));
+            c += img.Load(int3(texel, 0)) * w;
+            total += w;
+        }
+    }
+    c /= max(total, 0.00001);
+#elif defined(FILTER_BOX)
+    // Fixed 4x4 integration samples over one destination-pixel footprint.
+    float2 footprint = abs(ddx(i.uv)) + abs(ddy(i.uv));
+    [unroll] for (int y = 0; y < 4; ++y) {
+        [unroll] for (int x = 0; x < 4; ++x) {
+            float2 offset = (float2(x, y) + 0.5) / 4.0 - 0.5;
+            c += img.SampleLevel(linearSampler, i.uv + offset * footprint, 0);
+        }
+    }
+    c *= 1.0 / 16.0;
+#else
+    float2 pos = i.uv * dims - 0.5;
+    float2 base = floor(pos);
+    float2 frac = pos - base;
+    float total = 0;
+#ifdef FILTER_BICUBIC
+    [unroll] for (int y = -1; y <= 2; ++y) {
+        [unroll] for (int x = -1; x <= 2; ++x) {
+#else
+    [unroll] for (int y = -2; y <= 3; ++y) {
+        [unroll] for (int x = -2; x <= 3; ++x) {
+#endif
+            float w = weight(float(x) - frac.x) * weight(float(y) - frac.y);
+            float2 uv = (base + float2(x, y) + 0.5) / dims;
+            c += img.SampleLevel(pointSampler, uv, 0) * w;
+            total += w;
+        }
+    }
+    c /= max(total, 0.00001);
+#endif
+    if (opts.x > 0.0) {
+        c.rgb = float3(lut.Sample(pointSampler, float2(saturate(c.r), 0.5)).r,
+                       lut.Sample(pointSampler, float2(saturate(c.g), 0.5)).g,
+                       lut.Sample(pointSampler, float2(saturate(c.b), 0.5)).b);
+    }
+    return float4(saturate(c.rgb), 1.0);
+}
+)";
+
 // Depth is reversed in a 32 bit float buffer: 1 at the near clip, 0 at the far one, where a float keeps its finest
 // steps; a 24 bit buffer storing z / w lost the steps that told distant surfaces apart
 constexpr DXGI_FORMAT kDepthTypeless = DXGI_FORMAT_R32G8X24_TYPELESS;
@@ -632,6 +733,7 @@ private:
     void UploadGammaRamp();
     void DrawFrame(Target* t, uint32_t bi);
     void BlitFrame(Target& t);
+    ID3D12PipelineState* EnsureFinalDownsamplePipeline(uint32_t mode, DXGI_FORMAT rtv);
     void RenderUi();
     void ReleaseOldTextures();
     void ResetFrame();
@@ -764,6 +866,7 @@ private:
     std::unordered_map<uint64_t, Tex> textures_;  // by data address, a P8 texture's with its palette's above
     std::unordered_map<uint64_t, Tex> pack_textures_;  // texture pack images by key, kept for the run
     std::unordered_map<uint64_t, ComPtr<ID3D12PipelineState>> blit_psos_;
+    std::array<ComPtr<ID3D12PipelineState>, 5> final_downsample_psos_{};
     Extension* ext_ = nullptr;
     // one frame capture: every draw in a text file, each target as the frame leaves it, the textures it read
     FILE* cap_ = nullptr;
@@ -3494,6 +3597,25 @@ void D3D12Backend::UploadGammaRamp() {
     cl_->CopyTextureRegion(&dl, 0, 0, 0, &sl, nullptr);
 }
 
+// Separate PSO cache; no changes to ordinary texture blits or their taps.
+ID3D12PipelineState* D3D12Backend::EnsureFinalDownsamplePipeline(uint32_t mode, DXGI_FORMAT rtv) {
+    if (mode < 1 || mode > 4) return nullptr;
+    auto& pso = final_downsample_psos_[mode];
+    if (pso) return pso.Get();
+    std::string source = std::string(mode == 1 ? "#define FILTER_BICUBIC\n" :
+                                     mode == 2 ? "#define FILTER_LANCZOS\n" :
+                                     mode == 3 ? "#define FILTER_BOX\n" :
+                                                 "#define FILTER_AREA_WEIGHTED\n") + kFinalDownsampleHlsl;
+    uint64_t hash = 0;
+    ID3DBlob* vs = Compile(source, "vs", "vs_5_0", hash);
+    ID3DBlob* ps = Compile(source, "psmain", "ps_5_0", hash);
+    if (!vs || !ps) return nullptr;
+    auto desc = FullScreenPipelineDesc(vs, ps, rtv);
+    if (!PipelineMade(dev_->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pso)), "final downsample"))
+        return nullptr;
+    return pso.Get();
+}
+
 void D3D12Backend::BlitFrame(Target& t) {
     // 16:9 when the console reports a widescreen display, else 4:3
     bool wide = app::Widescreen();
@@ -3509,7 +3631,30 @@ void D3D12Backend::BlitFrame(Target& t) {
     cl_->RSSetScissorRects(1, &scissor);
     binds_ = {};
     Transition(t.res.Get(), t.state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    Blit(t.res.Get(), t.fmt, uv, {.gamma = gamma_});
+    const uint32_t filter = std::min(app::Get().downsample_filter, 4u);
+    if (filter == 0) {
+        Blit(t.res.Get(), t.fmt, uv, {.gamma = gamma_});
+        return;
+    }
+    ID3D12PipelineState* pso = EnsureFinalDownsamplePipeline(filter, kBgra);
+    if (!pso) {
+        // A failed shader compile must not leave a null PSO bound.
+        Blit(t.res.Get(), t.fmt, uv, {.gamma = gamma_});
+        return;
+    }
+    uint32_t slot = AllocSrvSlots(2);
+    D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
+    sv.Format = t.fmt;
+    sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    sv.Texture2D.MipLevels = 1;
+    dev_->CreateShaderResourceView(t.res.Get(), &sv, Cpu(srv_heap_.Get(), slot, srv_inc_));
+    sv.Format = kBgra;
+    dev_->CreateShaderResourceView(lut_.Get(), &sv, Cpu(srv_heap_.Get(), slot + 1, srv_inc_));
+    Alloc cb = Upload(256, 256);
+    float constants[8] = {0, 0, 1, 1, gamma_ ? 1.0f : 0.0f, 0, 0, 1};
+    std::memcpy(cb.cpu, constants, sizeof(constants));
+    DrawFullScreen(pso, cb.gpu, slot);
 }
 
 void D3D12Backend::RenderUi() {
