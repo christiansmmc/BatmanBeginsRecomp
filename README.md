@@ -9,6 +9,10 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
 </p>
 
+<p align="center">
+  <a href="https://recomplauncher.com/game/batmanbeginsrecomp"><img src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" alt="Get it on RecompLauncher"></a>
+</p>
+
 An unofficial native PC port of the original Xbox version of **Batman Begins** (2005), made by static recompilation. The game's x86 executable is translated to C++ ahead of time and built into a 64-bit Windows program. The Xbox kernel, Direct3D 8 and DirectSound calls are implemented on Windows, and everything is drawn with Direct3D 12 and played through XAudio2. There is no emulator and no Xbox BIOS involved.
 
 Built with the [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) tool by TGP482.
