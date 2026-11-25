@@ -17,6 +17,8 @@ void Init();
 // which the player used last; any thread
 void NoteKeyboard();
 void NoteController();
+// a controller is plugged in: until the player presses anything, the console's pictures show
+void NoteControllerConnected();
 
 // the controller's report as the game polls it, before the keyboard is added: true when it holds something the player did
 bool ControllerInUse(uint16_t buttons, const uint8_t analog[8], int16_t lx, int16_t ly, int16_t rx, int16_t ry);

@@ -33,13 +33,17 @@ enum class Lookup { None, Loading, Ready };
 struct Overlay {
     // can a texture of this size be one the game draws over; keeps the bytes of every other from being hashed
     bool (*wants_size)(uint32_t width, uint32_t height);
+    // would paint draw over this texture now; the console's pixels are not decoded otherwise
+    bool (*paints)(uint64_t key, uint32_t width, uint32_t height);
     // `bgra` is level 0 of the texture with key `key`, B G R A, rows tightly packed. Change it, and the size when the picture
     // is made bigger; false leaves the console's.
     bool (*paint)(uint64_t key, uint32_t& width, uint32_t& height, std::vector<uint8_t>& bgra);
-    // a number that changes whenever what paint draws does; every texture is made again
+    // a number that changes whenever what paint draws does. A picture is kept with the number it was made at and serves
+    // again whenever the number comes back, so switching back and forth paints nothing.
     uint32_t (*revision)();
 };
 void SetOverlay(const Overlay& overlay);  // once, before the first draw
+bool OverlaySize(uint32_t width, uint32_t height);
 
 // the picture paint makes for a texture's bytes, kept for Take; true when there is one
 bool MakeOverlay(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette);
@@ -49,6 +53,11 @@ bool MakeOverlay(uint64_t key, const TextureDesc& d, const uint8_t* guest, const
 bool Update();
 // changes with any texture setting: every texture's key and pack image are looked up again
 uint32_t Generation();
+// changes with the overlay's revision: the textures of a size it draws over look their picture up again
+uint32_t OverlayGeneration();
+// the keys of the overlay's pictures handed out before its revision last changed: their GPU copies are stale. The pack's
+// own images are not among them, since a pack image is only loaded once.
+std::vector<uint64_t> StaleOverlays();
 // replacement on and the pack holds images
 bool Replacing();
 
@@ -58,8 +67,8 @@ uint64_t Key(const TextureDesc& d, const FormatInfo& fi, const uint8_t* guest, c
 // once per key while dumping: PNG level 0, or DDS with every level in the format the renderer uploads
 void Dump(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette);
 
-// Ready moves the image into out; the first ask starts loading it off the calling thread.
-// None: replacement off, no pack image for key, or its file did not load
+// Ready moves the image into out (an overlay's picture is copied, and kept); the first ask starts loading it off the calling
+// thread. None: replacement off, no pack image or current overlay picture for key, or its file did not load
 Lookup Take(uint64_t key, Image& out);
 
 }  // namespace gpu::texturedumper

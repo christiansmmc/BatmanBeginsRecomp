@@ -27,10 +27,13 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "app/app.h"
 #include "core/log.h"
 #include "gpu/bc_decode.h"
+#include "gpu/overlay_cache.h"
 #include "gpu/shaders.h"
 
 using Microsoft::WRL::ComPtr;
@@ -77,9 +80,9 @@ struct Pack {
     std::unordered_set<uint64_t> asked;
     std::unordered_map<uint64_t, std::optional<Image>> loaded;  // empty: the file did not load
     std::unordered_set<uint64_t> dumped;
+    // the overlay's, the render thread's alone
     Overlay overlay{};
-    uint32_t overlay_revision = 0;
-    std::unordered_map<uint64_t, Image> made;  // what the overlay painted; the render thread's
+    OverlayCache<Image> made;
 };
 
 Pack g;
@@ -549,26 +552,28 @@ bool UpdatePackFiles() {
 bool Update() {
     bool changed = LatchSettings();
     bool reloaded = g.set.replacing && UpdatePackFiles();
-    bool repainted = false;
-    if (g.overlay.revision) {
-        const uint32_t revision = g.overlay.revision();
-        repainted = revision != g.overlay_revision;
-        g.overlay_revision = revision;
-        if (repainted) g.made.clear();
-    }
-    if (changed || reloaded || repainted) g.generation++;
-    return reloaded || repainted;
+    if (changed || reloaded) g.generation++;
+    if (reloaded) g.made.Forget();  // every GPU copy goes, the overlay's too
+    // A new revision lets go of the overlay's own pictures only (StaleOverlays). Dropping every pack image would lose
+    // them: a loaded image is handed out once, and its key stays asked until the pack is listed again.
+    if (g.overlay.revision) g.made.Latch(g.overlay.revision());
+    return reloaded;
 }
 
 void SetOverlay(const Overlay& overlay) { g.overlay = overlay; }
 
+bool OverlaySize(uint32_t width, uint32_t height) { return g.overlay.wants_size && g.overlay.wants_size(width, height); }
+
 uint32_t Generation() { return g.generation; }
+
+uint32_t OverlayGeneration() { return g.made.Generation(); }
+
+std::vector<uint64_t> StaleOverlays() { return g.made.TakeStale(); }
 
 bool Replacing() { return g.set.replacing && !g.files.empty(); }
 
 uint64_t Key(const TextureDesc& d, const FormatInfo& fi, const uint8_t* guest, const uint32_t* palette) {
-    const bool overlaid = g.overlay.wants_size && g.overlay.wants_size(d.width, d.height);
-    if (!Replacing() && !g.set.dumping && !overlaid) return 0;
+    if (!Replacing() && !g.set.dumping && !OverlaySize(d.width, d.height)) return 0;
     // cube maps, volumes and depth stay the console's; linear ones are movie frames and the game's own copies
     if (d.cube || d.depth > 1 || d.linear || UploadFormat(fi.host) == DXGI_FORMAT_UNKNOWN) return 0;
     uint32_t shape[] = {d.format, d.width, d.height};
@@ -595,9 +600,12 @@ void Dump(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32
 }
 
 bool MakeOverlay(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {
-    if (!key || !g.overlay.paint || !g.overlay.wants_size || !g.overlay.wants_size(d.width, d.height)) return false;
+    if (!key || !g.overlay.paint || !g.overlay.paints || !g.overlay.paints(key, d.width, d.height)) return false;
     if (g.set.replacing && g.files.count(key)) return false;  // the pack's own image
-    if (g.made.count(key)) return true;
+    // painted already for what the overlay shows now: a device switched back and forth costs no painting
+    if (g.made.Has(key)) return true;
+    // the revision as paint sees it: it may have moved on since Update, and then the picture serves after the next one
+    const uint32_t revision = g.overlay.revision ? g.overlay.revision() : 0;
     const Image console = Decode(d, guest, palette);
     if (console.levels.empty()) return false;
     const Level& top = console.levels[0];
@@ -625,17 +633,18 @@ bool MakeOverlay(uint64_t key, const TextureDesc& d, const uint8_t* guest, const
     img.height = height;
     img.levels.push_back({std::move(bgra), width * 4});
     AddMipmaps(img);
-    g.made.emplace(key, std::move(img));
-    return true;
+    g.made.Put(key, revision, std::move(img));
+    return g.made.Has(key);
 }
 
 Lookup Take(uint64_t key, Image& out) {
     auto file = g.files.find(key);
     if (!g.set.replacing || file == g.files.end()) {
-        auto made = g.made.find(key);
-        if (made == g.made.end()) return Lookup::None;
-        out = std::move(made->second);
-        g.made.erase(made);
+        // only a picture for the current revision: one kept from another (the keyboard's, while the controller is in use)
+        // is not drawn
+        const Image* made = g.made.Hand(key);
+        if (!made) return Lookup::None;
+        out = *made;  // a copy: the picture is kept for the next time this revision comes back
         return Lookup::Ready;
     }
     uint32_t revision = 0;
