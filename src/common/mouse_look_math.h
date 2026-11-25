@@ -1,6 +1,6 @@
 // Mouse look for the camera. The camera's input function (0x33A70) turns the right stick into this frame's turn, with a
-// gain, a dead band and the game's slow motion factor in it. The mouse does not move a stick: it moves the camera by the angle it
-// travelled, so these work out which stick value makes that function produce exactly that angle, with the game's own locks,
+// gain, a dead band and the game's frame time factor in it. The mouse does not move a stick: it moves the camera by the angle
+// it travelled, so these work out which stick value makes that function produce exactly that angle, with the game's own locks,
 // limits and automatic return still in force. See docs/TECHNICAL.md, "Mouse look".
 #pragma once
 #include <algorithm>
@@ -16,11 +16,13 @@ inline constexpr float kYawFloor = 0.006f;         // 0x2E5B30, a turn smaller t
 
 // a mouse move the camera cannot take yet waits for the next frames, up to this much (radians)
 inline constexpr float kMaxPending = 0.5f;
-// below this the slow motion factor is the game at a standstill, and nothing is divided by it
+// below this the frame time factor is the game at a standstill, and nothing is divided by it
 inline constexpr float kMinSlowMotion = 0.01f;
 
-// what the camera multiplies the stick by: [camera+0x864], [camera+0x868] and [0x30FF90], the game's slow motion (1 in
-// play), which is not the frame length: the camera's turn is a step per frame
+// what the camera multiplies the stick by: [camera+0x864] and [camera+0x868], whose sign is the game's own horizontal and
+// vertical camera options (-1 when on, +1 when off, written at 0x257B6), and [0x30FF90], m_GameRenderFrameRateMul: the
+// game's slow motion times 60 / rate, so 2 at 30 FPS and 1 at 60 in normal play. The turn is per frame and scaled by it, and
+// the functions below divide by it, so the mouse's angle does not depend on the frame rate.
 struct CameraTerms {
     float yaw_gain;
     float pitch_gain;
@@ -33,13 +35,16 @@ struct Sticks {
     float y;
 };
 
+// invert_x / invert_y false: the view goes the way the mouse goes (right turns right, down looks down)
 struct Tuning {
     float radians_per_count;
     bool invert_x;
     bool invert_y;
 };
 
-// the turn per frame (radians) the camera takes from a stick value, and the stick value that gives a turn
+// The turn per frame (radians) the camera takes from a stick value, and the stick value that gives a turn. Whatever the gains'
+// sign, a positive yaw rate turns the view left and a positive pitch rate looks up: the gain only decides which way the stick
+// has to go for it.
 inline float YawRateOf(float x, const CameraTerms& c) { return c.yaw_gain * c.slow_motion * x * kYawScale; }
 inline float StickForYawRate(float rate, const CameraTerms& c) { return rate / (c.yaw_gain * c.slow_motion * kYawScale); }
 
@@ -48,11 +53,13 @@ inline float PitchRateOf(float y, const CameraTerms& c) {
     const float rate = size * c.pitch_gain * c.slow_motion;
     return y < 0.0f ? -rate : rate;
 }
+// the dead band is taken off the size before the gain, so the size comes from the gain's magnitude and the stick's sign from
+// the rate's and the gain's together
 inline float StickForPitchRate(float rate, const CameraTerms& c) {
     if (rate == 0.0f) return 0.0f;
-    const float size = std::fabs(rate) / (c.pitch_gain * c.slow_motion) + kPitchDeadBand;
+    const float size = std::fabs(rate) / (std::fabs(c.pitch_gain) * c.slow_motion) + kPitchDeadBand;
     const float y = size / kPitchScale;
-    return rate < 0.0f ? -y : y;
+    return (rate < 0.0f) != (c.pitch_gain < 0.0f) ? -y : y;
 }
 
 // Adds what the mouse moved to the stick the camera is about to read. The title's thread only.
@@ -61,8 +68,9 @@ public:
     // dx and dy are the mouse counts since the last frame, to the right and downwards. The result is the stick to give the
     // camera: the same as the one given when the mouse did not move.
     Sticks Apply(Sticks stick, float dx, float dy, const CameraTerms& c, const Tuning& t) {
-        yaw_ = std::clamp(yaw_ + dx * t.radians_per_count * (t.invert_x ? -1.0f : 1.0f), -kMaxPending, kMaxPending);
-        pitch_ = std::clamp(pitch_ + dy * t.radians_per_count * (t.invert_y ? -1.0f : 1.0f), -kMaxPending, kMaxPending);
+        // a positive rate is to the left and upwards, so the mouse's right and down are negative unless inverted
+        yaw_ = std::clamp(yaw_ + dx * t.radians_per_count * (t.invert_x ? 1.0f : -1.0f), -kMaxPending, kMaxPending);
+        pitch_ = std::clamp(pitch_ + dy * t.radians_per_count * (t.invert_y ? 1.0f : -1.0f), -kMaxPending, kMaxPending);
         if (c.slow_motion < kMinSlowMotion) return stick;
 
         if (yaw_ != 0.0f && c.yaw_gain != 0.0f) {

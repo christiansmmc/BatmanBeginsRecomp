@@ -40,7 +40,7 @@ void LoadMore(const void* table) {
     const toml::table& t = *static_cast<const toml::table*>(table);
     g_play_rate.Load(t["experimental_play_fps"].value_or(uint32_t{0}));
     // mouse_look = false leaves the mouse to the desktop; mouse_sensitivity is degrees of turn per mouse count
-    mouse::Configure(t["mouse_look"].value_or(true), t["mouse_sensitivity"].value_or(0.08), t["mouse_invert_x"].value_or(true), t["mouse_invert_y"].value_or(true));
+    mouse::Configure(t["mouse_look"].value_or(true), t["mouse_sensitivity"].value_or(0.08), t["mouse_invert_x"].value_or(false), t["mouse_invert_y"].value_or(false));
     // pc_prompts = false keeps the console's button pictures; on, they show the player's keys while the keyboard is in use
     prompts::Configure(t["pc_prompts"].value_or(true));
     options::LoadSettings(table);
@@ -87,7 +87,13 @@ void Ui(double) {
 
 void Pad(int port, input::Pad& pad) {
     ApplyPadScript(port, pad);
-    if (pad.connected && prompts::ControllerInUse(pad.buttons, pad.analog, pad.lx, pad.ly, pad.rx, pad.ry)) prompts::NoteController();
+    if (pad.connected) {
+        if (prompts::ControllerInUse(pad.buttons, pad.analog, pad.lx, pad.ly, pad.rx, pad.ry)) {
+            prompts::NoteController();
+        } else {
+            prompts::NoteControllerConnected();
+        }
+    }
     options::SeeController(port, pad);
     ApplyWindowKeyboard(port, pad);
     options::GateReport(port, pad);
@@ -96,12 +102,12 @@ void Pad(int port, input::Pad& pad) {
 bool Message(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t*) {
     mouse::OnWindowMessage(hwnd, message, wp, lp);
     bool button_down = false;
-    if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || (MouseButtonOfMessage(message, wp, &button_down), button_down)) {
-        prompts::NoteKeyboard();
-    }
-    // the mouse's buttons are the game's only while it has the mouse: a click that brings the window forward, or one on
-    // the options screen, does not punch
-    if (!MouseButtonOfMessage(message, wp, nullptr) || mouse::Capturing()) KeyboardWindowMessage(message, wp, lp);
+    const bool button = MouseButtonOfMessage(message, wp, &button_down) != 0;
+    // a mouse button is the game's only when mouse::TakesButton says so: not the click that brings the window forward,
+    // nor one on the options screen
+    const bool game_button = button && mouse::TakesButton(hwnd, button_down);
+    if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || (game_button && button_down)) prompts::NoteKeyboard();
+    if (!button || game_button) KeyboardWindowMessage(message, wp, lp);
     options::OnWindowMessage(message, wp, lp);
     return false;
 }

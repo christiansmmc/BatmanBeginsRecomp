@@ -25,8 +25,14 @@ void OnWindowMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp);
 // GameInfo::ui, each frame: the options screen opening or closing changes who has the mouse
 void Sync();
 
-// the game has the mouse: the window is in front, the cursor is hidden and kept inside it, and the buttons count
+// the game has the mouse: the window is in front, the camera reads the stick, the cursor is hidden and kept inside it, and
+// the buttons count
 bool Capturing();
+
+// window thread, for each mouse button message: does it go to the game. Not the press of the click that brings the window
+// forward; otherwise yes while the window is in front and no screen of the port's is open, whether the cursor is taken
+// (play with mouse look on) or free (mouse look off, menus, cutscenes).
+bool TakesButton(void* hwnd, bool down);
 
 struct Motion {
     bool active;  // the game has the mouse; false resets what the aim kept

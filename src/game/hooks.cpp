@@ -56,7 +56,7 @@ void AddBefore(X86Context& ctx, int reg, float step) {
 bool g_above_shipped = false;
 
 constexpr uint32_t kCameraYawGain = 0x864, kCameraPitchGain = 0x868;  // camera fields: what the stick is multiplied by
-constexpr uint32_t kSlowMotion = 0x30FF90;  // EXBaseApp::m_GameRenderFrameRateMul, 1 in play
+constexpr uint32_t kSlowMotion = 0x30FF90;  // EXBaseApp::m_GameRenderFrameRateMul: slow motion times 60 / rate (2 at 30 FPS, 1 at 60)
 float GuestFloat(uint32_t address) { return std::bit_cast<float>(kernel::R32(address)); }
 
 mouse::Aim g_mouse_aim;  // the title's thread
