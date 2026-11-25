@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6" alt="Platform: Windows 10 and 11, x64">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64%20%7C%20Linux%20(Wine%2FProton)-0078D6" alt="Platform: Windows 10 and 11, x64; Linux through Wine or Proton">
   <img src="https://img.shields.io/badge/renderer-Direct3D%2012-2d6a4f" alt="Renderer: Direct3D 12">
   <img src="https://img.shields.io/badge/campaign-playable%20to%20the%20credits-c8961e" alt="Campaign: playable to the credits">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
