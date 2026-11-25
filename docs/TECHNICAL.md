@@ -506,24 +506,29 @@ The mouse turns the camera by the angle it travelled, not as a stick held over. 
 
 - turn: `[cam+0x874] = [cam+0x864] * [0x30FF90] * x * 0.048` (`0x2E5B2C`), dropped to 0 when under 0.006 (`0x2E5B30`). The caller does `[cam+0x964] -= [cam+0x874]`, the yaw
 - pitch: `p = y * 0.0506` (`0x2E5B28`); its size minus 0.027 (`0x2E5B24`), not below 0, with the sign of `p`; then `* [cam+0x868] * [0x30FF90]` into `[cam+0x878]`. The caller does `[cam+0x960] += [cam+0x878]`. The limits near 1.27 and 1.67 (`0x2E5B34`, `0x2E5B38`) are radians
-- both turns are 0 when `[cam+0x9C4]` or `[cam+0x9D5]` is set, and the whole stick path is skipped while the camera is returning behind the hero
+- the pitch is 0 when `[cam+0x9C4]` or `[cam+0x9D5]` is set (the jumps at `0x33DC1` and `0x33DCD` go to `0x33B5E`, which zeroes `[cam+0x878]` only; the turn stays), and the whole stick path is skipped while the camera is returning behind the hero
 
-`[0x30FF90]` is `m_GameRenderFrameRateMul`, the game's slow motion (1 in play), not the frame length, so the camera's turn is a step per frame.
+`[0x30FF90]` is `m_GameRenderFrameRateMul`, the game's slow motion times `m_GameFrameRateMul` (`UpdateFrameRate` writes it at `0x182A6E` and `0x182AE5`), so 2 at 30 FPS and 1 at 60 in play, as in the frame rate table above. The turn is per frame and scaled by it.
+
+The gains are the game's own camera options: at `0x257B6` it reads the options `0x4200021D` (horizontal) and `0x4200021C` (vertical) and writes -1.0 to `[cam+0x864]` and `[cam+0x868]` when on, +1.0 when off. Whatever the gain, a positive turn goes left and a positive pitch looks up: in the game, with both options on the stick to the right turns right and up looks up, and with both off the opposite (measured by the maintainer).
 
 ### What the port does
 
-A hook at `0x33D97` (`MouseLookCamera`, `src/game/hooks.cpp`) changes `xmm2` and `xmm1` so that these formulas give the angle the mouse moved (`src/common/mouse_look_math.h`: the formulas run backwards, with the stick's own turn added). The camera's gain, the slow motion, the locks and the return behind the hero stay the game's. Two things the formulas would otherwise get wrong:
+A hook at `0x33D97` (`MouseLookCamera`, `src/game/hooks.cpp`) changes `xmm2` and `xmm1` so that these formulas give the angle the mouse moved (`src/common/mouse_look_math.h`: the formulas run backwards, with the stick's own turn added). The camera's gain, the frame time factor, the locks and the return behind the hero stay the game's. The inverse divides by the factor, so the angle does not depend on the frame rate. Three things the formulas would otherwise get wrong:
 
 - the 0.006 floor drops a slow turn every frame, so a move under it waits and gathers until it is over (up to 0.5 rad)
 - the pitch's 0.027 is taken off the size, so a small pitch needs a stick of at least 0.53; the inverse adds it back
+- with a gain of -1 (the game's option on) the dead band still comes off the size before the gain, so the inverse takes the size from the gain's magnitude and the stick's sign from the rate's and the gain's together. Dividing by the signed gain instead loses every vertical move under about 186°/s
 
-The movement comes from Raw Input (`WM_INPUT`, `src/common/mouse_look.cpp`), counted only while the game has the mouse: the window in front, the option on, and no screen of the port's open (`app::PauseAsked`). Then the cursor is hidden and kept inside the window. Movement from a stretch in which the camera did not ask for 250 ms (a menu, a cutscene) is dropped, so it does not turn the camera when play comes back. The buttons are keys 1, 2, 4, 5 and 6 of the key map (`MouseButtonOfMessage`), counted only while the game has the mouse, and can be chosen on the KEYBOARD tab with a click on the row and then a button. Left and right are not bound by default.
+The movement comes from Raw Input (`WM_INPUT`, `src/common/mouse_look.cpp`), counted only while the game has the mouse: the option on, the window in front, no screen of the port's open (`app::PauseAsked`), and the camera having asked for the stick in the last 250 ms. Then the cursor is hidden and kept inside the window; in the title, menus, cutscenes and pauses the camera does not ask, so the cursor is free and the window can be moved or closed. Movement from a stretch in which the camera did not ask is dropped, so it does not turn the camera when play comes back.
 
-Settings: `mouse_look` (true), `mouse_sensitivity` (degrees of turn per mouse count, 0.08; over 0 up to 5) and `mouse_invert_x` / `mouse_invert_y` (both true by default). The MOUSE tab toggles these live and saves them.
+The buttons are keys 1, 2, 4, 5 and 6 of the key map (`MouseButtonOfMessage`) and can be chosen on the KEYBOARD tab with a click on the row and then a button. Left and right are not bound by default. They reach the game while the window is in front and no screen of the port's is open, with the cursor taken or free (so they also work with `mouse_look` off and in the game's menus); the click that brings the window forward never does (`mouse::TakesButton`). When the game gives the cursor back, only the actions held by mouse buttons are let go of: a key held into a cutscene stays held.
+
+Settings: `mouse_look` (true), `mouse_sensitivity` (degrees of turn per mouse count, 0.08; over 0 up to 5) and `mouse_invert_x` / `mouse_invert_y` (both false by default: the view goes the way the mouse goes, whatever the game's camera options). The MOUSE tab toggles the two inversions live and saves them; `mouse_look` and `mouse_sensitivity` are only in the file.
 
 ### Not verified
 
-- Nothing of this has run in the game. The signs follow the stick's (so the mouse should do what the stick does), and the feel of the default speed is a guess
+- The changes made after review (the pitch with the game's vertical option on, the inversion's meaning, the cursor taken only while the camera asks, the buttons with mouse look off) were built and tested natively, not played. The feel of the default speed is a guess
 - The four modes may use `[cam+0x874]` differently: it is read in about 50 places, and the one at `0x32A38` adds where the caller at `0x27198` subtracts. Which camera each mode is was not worked out
 - Modes that read the stick elsewhere (`0x2B081` reads the right stick's y on its own) are not changed; they keep the stick
 - The turn each frame is exact, but the camera's own smoothing after `[cam+0x874]` was not read
@@ -549,13 +554,13 @@ The boxes of the pictures in each are in `src/common/prompt_art.h`, measured on 
 
 `gpu::texturedumper` has an overlay: for a texture the game names, it decodes the console's level 0 (`gpu/bc_decode.h` for the BC formats), gives it to a function that draws on it, and uses the result in place of the texture, the same way as a pack image (a file of the same key in `textures\replacement` goes first). `src/common/key_prompts.cpp` draws a key cap with the key's label over each button, from the current key map. The texture is made four times bigger for it, so the letters have room; the game samples by fractions, so it draws the same. The labels are at most three characters (`SPC`, `LSH`, `LMB`, `F5`), in a 5x7 font of the port's own, so nothing is read from the system's fonts.
 
-Rebinding changes the picture at once: the overlay's `revision` is a hash of the key map, the setting and the last device, `Update` sees it change, drops the textures it made and every texture asks again. The console's pixels are only read, never written, so turning a setting off or rebinding needs no restart.
+Rebinding changes the picture at once. The overlay's `revision` is a hash of the key map while the keys show, and 1 while the console's do. When `Update` sees it change, only the overlay's own GPU copies go (`StaleOverlays`): the textures of the sizes it draws over look their picture up again, and a texture pack's images stay. Dropping every pack image instead would lose them for the session, because a loaded pack image is handed out once and its key stays asked until the pack is listed again. Each picture is kept with the revision it was painted at (`gpu/overlay_cache.h`), so going back to the keyboard with the same keys paints nothing, and while the console's pictures show nothing is decoded. Painting the three sheets took about 21 ms of CPU in a microbenchmark, so only a rebind costs that, once, with the options screen open. The console's pixels are only read, never written, so turning a setting off or rebinding needs no restart.
 
-Which device was used last decides what is shown: a key or mouse button press makes it the keyboard's, the controller reporting a button, a trigger past 100 or a stick past half makes it the console's. `pc_prompts = false` never shows the keys.
+Which device was used last decides what is shown: a key or mouse button press makes it the keyboard's, the controller reporting a button, a trigger past 100 or a stick past half makes it the console's. At start the keys show, unless a controller is connected and nothing has been pressed yet. `pc_prompts = false` never shows the keys.
 
 ### Not verified
 
-- Nothing was run in the game or on Windows. The drawing (`prompt_art.h`) and the BC decoding have native tests, and the pictures were drawn over the dumped PNGs and looked at; the overlay in `texturedumper.cpp` and its use in `d3d12.cpp` were only read, not compiled.
+- The overlay builds, its bookkeeping has a native test (`overlay_cache_test`), and the drawing (`prompt_art.h`) and the BC decoding have native tests; the pictures were drawn over the dumped PNGs and looked at. Switching devices with a texture pack loaded, and the cost of a switch in the game, were not run.
 - Which glyph of the font is which cell of the atlas is read off the picture, not off the font's data. The directional pad's pictures (the grey one and two with a red arm) and the stick pictures were not replaced: it is not known where the stick pictures are, nor which glyph is up, down, left and right.
 - Prompts the game draws some other way than from these three textures stay the console's.
 

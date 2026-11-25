@@ -76,8 +76,8 @@ All of these are on the in-game options screen, which opens with <kbd>Esc</kbd>,
 
 - **Controller**: any controller SDL3 supports, with the Xbox layout and no setup. Controllers can be connected and disconnected while playing.
 - **Keyboard**: always works as player 1, with or without a controller. All 24 actions can be rebound from the KEYBOARD tab, to mouse buttons too.
-- **Key prompts**: the game's button pictures (A, B, X, Y, the triggers, black and white, BACK, START) show the key bound to the action while the keyboard or mouse was the last thing used, and the console's again after the controller; they follow what is rebound. `pc_prompts = false` in `settings.toml` keeps the console's. The directional pad and stick pictures are not replaced yet.
-- **Mouse**: looks around while the game has the mouse (window in front, options screen closed). Sensitivity is `mouse_sensitivity` in `settings.toml`; invert X/Y on the MOUSE tab (or with `mouse_invert_x` and `mouse_invert_y`, both true by default); `mouse_look = false` turns it off.
+- **Key prompts**: the game's button pictures (A, B, X, Y, the triggers, black and white, BACK, START) show the key bound to the action while the keyboard or mouse was the last thing used, and the console's again after the controller (and at start when a controller is connected); they follow what is rebound. `pc_prompts = false` in `settings.toml` keeps the console's. The directional pad and stick pictures are not replaced yet.
+- **Mouse**: looks around during play while the window is in front and the options screen is closed; in menus and cutscenes the cursor is free. Sensitivity is `mouse_sensitivity` in `settings.toml`; invert X/Y on the MOUSE tab (or with `mouse_invert_x` and `mouse_invert_y`, both false by default); `mouse_look = false` turns it off, and mouse buttons bound to actions still work.
 
 ### General
 
