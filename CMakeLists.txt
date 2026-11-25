@@ -98,6 +98,7 @@ add_native_test(settings_file)
 target_link_libraries(settings_file_test PRIVATE tomlplusplus::tomlplusplus)
 add_native_test(movie_path)
 add_native_test(pixel_shader sdk/runtime/gpu/shaders.cpp)
+add_native_test(shader_portability sdk/runtime/gpu/shaders.cpp)
 add_native_test(shader_cache sdk/runtime/gpu/shader_cache.cpp sdk/runtime/gpu/shaders.cpp)
 
 # The executable rebuilds the DLL at start when the DLL is older than it. A host-only build keeps the same exports, so

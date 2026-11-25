@@ -119,6 +119,7 @@ Measured: the title and menus run at 30, and only videos at 60. Capping the outp
 - **Monitors:** `fps_cap` holds each frame for the time a slower monitor would.
 - **Slow seconds:** `tools/perf_report.py` lists each second below 29 FPS and says whether shader compilation explains it.
 - **Frame captures:** F3, with `XBE_CAPTURE_DIR` set, writes every draw of one frame with its states, constants and vertices.
+- **Shader sources:** `BB_DEV_SHADER_DUMP=<dir>`, off by default, writes each shader's HLSL as `<hash>.<entry>.<profile>.hlsl`, cached ones included. Compiling those files under Wine with a fresh prefix checks them against Wine's built-in `d3dcompiler_47` (vkd3d-shader), which rejects some of what Microsoft's compiler takes. Up to v1.0.0 the vertex helpers spelled infinity `1.#INF`: on Wine's compiler every vertex shader failed with `E5000` and the screen stayed black. Spelled `asfloat(0x7F800000)`, the 62 shaders of a new game's first room compile on Wine 11.0's built-in compiler, and Microsoft's compiler makes the same code as before for each of them.
 
 ### Speed against xemu at 30
 
