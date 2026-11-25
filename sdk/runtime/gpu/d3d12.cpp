@@ -1594,10 +1594,32 @@ ID3DBlob* D3D12Backend::StoredShader(uint64_t hash) {
     return code.Get();
 }
 
+// BB_DEV_SHADER_DUMP=<dir>: each shader's source, as <hash>.<entry>.<profile>.hlsl, to compile it with another
+// compiler. Wine's built-in d3dcompiler_47 is not Microsoft's and rejects some of what FXC takes
+void DumpShaderSource(const std::string& src, const char* entry, const char* profile, uint64_t hash) {
+    static const std::filesystem::path dir = [] {
+        const char* v = std::getenv("BB_DEV_SHADER_DUMP");
+        if (!v || !*v) return std::filesystem::path();
+        std::error_code ec;
+        std::filesystem::path d = app::ExeDir() / v;
+        std::filesystem::create_directories(d, ec);
+        LOGR("shader dump: %s", d.string().c_str());
+        return d;
+    }();
+    if (dir.empty()) return;
+    char name[96];
+    std::snprintf(name, sizeof(name), "%016llx.%s.%s.hlsl", (unsigned long long)hash, entry, profile);
+    std::FILE* f = std::fopen((dir / name).string().c_str(), "wb");
+    if (!f) return;
+    std::fwrite(src.data(), 1, src.size(), f);
+    std::fclose(f);
+}
+
 ID3DBlob* D3D12Backend::Compile(const std::string& src, const char* entry, const char* profile, uint64_t& hash) {
     hash = ShaderKey(src, entry, profile);
     auto it = blobs_.find(hash);
     if (it != blobs_.end()) return it->second.Get();
+    DumpShaderSource(src, entry, profile, hash);
     if (ID3DBlob* stored = StoredShader(hash)) return stored;
     ComPtr<ID3DBlob> code;
     ComPtr<ID3DBlob> err;
