@@ -131,6 +131,7 @@ std::string KeyName(uint32_t virtual_key) {
         {0xC0, "' \""},    {0xC1, "/ ?"},       {0xC2, "NUM ."},     {0xDB, "[ {"},      {0xDC, "\\ |"},
         {0xDD, "] }"},     {0xDE, "~ ^"},
         {0x6A, "NUM *"},   {0x6B, "NUM +"},     {0x6D, "NUM -"},     {0x6E, "NUM ,"},    {0x6F, "NUM /"},
+        {0x01, "LEFT MOUSE"}, {0x02, "RIGHT MOUSE"}, {0x04, "MIDDLE MOUSE"}, {0x05, "MOUSE 4"}, {0x06, "MOUSE 5"},
     };
     for (const auto& entry : kNames)
         if (entry.virtual_key == virtual_key) return entry.name;

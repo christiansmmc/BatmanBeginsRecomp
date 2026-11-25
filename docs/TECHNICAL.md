@@ -492,6 +492,78 @@ The warm run's remaining seconds below 29 FPS (25.8 to 28.5) all fall on file lo
 
 The cache is built from the game's own shaders, so it stays out of Git. `tools/make_dist.py` gives a new portable folder every shader of the build's cache and of any cache passed with `--cache`, without mixing cache versions; an existing folder keeps its own. The portable folder used for the campaign started with 62 shaders (424,932 bytes), and no shader compiled in runs through the logos, title, menus, options screen, a new game, saving, the opening video, the first room's fight and explosion, and the start of chapter 2 with its corridor and pause. The rest of the campaign compiles each new shader once, on first sight, and keeps it. The code is DXBC from `D3DCompile`, which does not depend on the GPU (general knowledge, not measured on another GPU).
 
+## Mouse look
+
+The mouse turns the camera by the angle it travelled, not as a stick held over. Everything below comes from reading the code of the US release (nothing here was measured in play yet; see the end of this section).
+
+### The stick in the game
+
+`XInputGetState` is called once per port in the loop at `0x1FD0E0`, and `0x1FCB30(port, state)` turns the raw state into floats in the pad object (the one at `0x40042C`), 0x40 bytes per port: left stick x and y at `+0x84` and `+0x88`, right stick at `+0x8C` and `+0x90`. A dead zone of 13107 (40%) and a curve are applied, chosen by a byte per port and stick (`+0x284`, `+0x285`; three modes). In all three the game's x is positive to the right and its y is negative upwards, the opposite of XInput's. Values are about -1 to 1.
+
+### The camera's input function
+
+`0x33A70` is called from four camera modes (`0x27193`, `0x27F93`, `0x288F8`, `0x37116`). Once the stick is read into `xmm2` (x) and `xmm1` (y), at `0x33D97`:
+
+- turn: `[cam+0x874] = [cam+0x864] * [0x30FF90] * x * 0.048` (`0x2E5B2C`), dropped to 0 when under 0.006 (`0x2E5B30`). The caller does `[cam+0x964] -= [cam+0x874]`, the yaw
+- pitch: `p = y * 0.0506` (`0x2E5B28`); its size minus 0.027 (`0x2E5B24`), not below 0, with the sign of `p`; then `* [cam+0x868] * [0x30FF90]` into `[cam+0x878]`. The caller does `[cam+0x960] += [cam+0x878]`. The limits near 1.27 and 1.67 (`0x2E5B34`, `0x2E5B38`) are radians
+- the pitch is 0 when `[cam+0x9C4]` or `[cam+0x9D5]` is set (the jumps at `0x33DC1` and `0x33DCD` go to `0x33B5E`, which zeroes `[cam+0x878]` only; the turn stays), and the whole stick path is skipped while the camera is returning behind the hero
+
+`[0x30FF90]` is `m_GameRenderFrameRateMul`, the game's slow motion times `m_GameFrameRateMul` (`UpdateFrameRate` writes it at `0x182A6E` and `0x182AE5`), so 2 at 30 FPS and 1 at 60 in play, as in the frame rate table above. The turn is per frame and scaled by it.
+
+The gains are the game's own camera options: at `0x257B6` it reads the options `0x4200021D` (horizontal) and `0x4200021C` (vertical) and writes -1.0 to `[cam+0x864]` and `[cam+0x868]` when on, +1.0 when off. Whatever the gain, a positive turn goes left and a positive pitch looks up: in the game, with both options on the stick to the right turns right and up looks up, and with both off the opposite (measured by the maintainer).
+
+### What the port does
+
+A hook at `0x33D97` (`MouseLookCamera`, `src/game/hooks.cpp`) changes `xmm2` and `xmm1` so that these formulas give the angle the mouse moved (`src/common/mouse_look_math.h`: the formulas run backwards, with the stick's own turn added). The camera's gain, the frame time factor, the locks and the return behind the hero stay the game's. The inverse divides by the factor, so the angle does not depend on the frame rate. Three things the formulas would otherwise get wrong:
+
+- the 0.006 floor drops a slow turn every frame, so a move under it waits and gathers until it is over (up to 0.5 rad)
+- the pitch's 0.027 is taken off the size, so a small pitch needs a stick of at least 0.53; the inverse adds it back
+- with a gain of -1 (the game's option on) the dead band still comes off the size before the gain, so the inverse takes the size from the gain's magnitude and the stick's sign from the rate's and the gain's together. Dividing by the signed gain instead loses every vertical move under about 186°/s
+
+The movement comes from Raw Input (`WM_INPUT`, `src/common/mouse_look.cpp`), counted only while the game has the mouse: the option on, the window in front, no screen of the port's open (`app::PauseAsked`), and the camera having asked for the stick in the last 250 ms. Then the cursor is hidden and kept inside the window; in the title, menus, cutscenes and pauses the camera does not ask, so the cursor is free and the window can be moved or closed. Movement from a stretch in which the camera did not ask is dropped, so it does not turn the camera when play comes back.
+
+The buttons are keys 1, 2, 4, 5 and 6 of the key map (`MouseButtonOfMessage`) and can be chosen on the KEYBOARD tab with a click on the row and then a button. Left and right are not bound by default. They reach the game while the window is in front and no screen of the port's is open, with the cursor taken or free (so they also work with `mouse_look` off and in the game's menus); the click that brings the window forward never does (`mouse::TakesButton`). When the game gives the cursor back, only the actions held by mouse buttons are let go of: a key held into a cutscene stays held.
+
+Settings: `mouse_look` (true), `mouse_sensitivity` (degrees of turn per mouse count, 0.08; over 0 up to 5) and `mouse_invert_x` / `mouse_invert_y` (both false by default: the view goes the way the mouse goes, whatever the game's camera options). The MOUSE tab toggles the two inversions live and saves them; `mouse_look` and `mouse_sensitivity` are only in the file.
+
+### Not verified
+
+- The changes made after review (the pitch with the game's vertical option on, the inversion's meaning, the cursor taken only while the camera asks, the buttons with mouse look off) were built and tested natively, not played. The feel of the default speed is a guess
+- The four modes may use `[cam+0x874]` differently: it is read in about 50 places, and the one at `0x32A38` adds where the caller at `0x27198` subtracts. Which camera each mode is was not worked out
+- Modes that read the stick elsewhere (`0x2B081` reads the right stick's y on its own) are not changed; they keep the stick
+- The turn each frame is exact, but the camera's own smoothing after `[cam+0x874]` was not read
+- Raw Input in a remote desktop session reports absolute positions, which are ignored
+
+## Key prompts
+
+The game shows a button as a picture, never as text: the font has glyphs for the buttons (the tokens `(LANALOG)`, `(RANALOG)`, `(DPADUP)`, `(DPADDOWN)`, `(DPADL)`, `(DPADR)` that the function at `0xF6800` replaces with the glyphs `0xBD`, `0xBE`, `0x84`, `0x86`, `0x87`, `0x94`), and the HUD has its own textures. A face button's picture is not in the executable, only in the game's textures, so it is changed where the textures are made.
+
+### Which textures
+
+Found by dumping the game's textures (`dump_textures`) and looking for the pictures. The key is the name the dump gives, a hash of the bytes, size and format.
+
+| Key | Size and format | Holds |
+| --- | --- | --- |
+| `e17fcca2edd00edb` | 128x128 DXT3 | the font's buttons: A, B, X, Y, white, black, BACK, both triggers (round and tall), START; also the directional pad, the G D I S buttons and the words BACK and START |
+| `3020a8ad19ca2b71` | 64x64 DXT3 | A and B above X and Y |
+| `90039937beb703d4` | 64x64 A8R8G8B8 | the same, in another place and format |
+
+The boxes of the pictures in each are in `src/common/prompt_art.h`, measured on the dumps.
+
+### What the port does
+
+`gpu::texturedumper` has an overlay: for a texture the game names, it decodes the console's level 0 (`gpu/bc_decode.h` for the BC formats), gives it to a function that draws on it, and uses the result in place of the texture, the same way as a pack image (a file of the same key in `textures\replacement` goes first). `src/common/key_prompts.cpp` draws a key cap with the key's label over each button, from the current key map. The texture is made four times bigger for it, so the letters have room; the game samples by fractions, so it draws the same. The labels are at most three characters (`SPC`, `LSH`, `LMB`, `F5`), in a 5x7 font of the port's own, so nothing is read from the system's fonts.
+
+Rebinding changes the picture at once. The overlay's `revision` is a hash of the key map while the keys show, and 1 while the console's do. When `Update` sees it change, only the overlay's own GPU copies go (`StaleOverlays`): the textures of the sizes it draws over look their picture up again, and a texture pack's images stay. Dropping every pack image instead would lose them for the session, because a loaded pack image is handed out once and its key stays asked until the pack is listed again. Each picture is kept with the revision it was painted at (`gpu/overlay_cache.h`), so going back to the keyboard with the same keys paints nothing, and while the console's pictures show nothing is decoded. Painting the three sheets took about 21 ms of CPU in a microbenchmark, so only a rebind costs that, once, with the options screen open. The console's pixels are only read, never written, so turning a setting off or rebinding needs no restart.
+
+Which device was used last decides what is shown: a key or mouse button press makes it the keyboard's, the controller reporting a button, a trigger past 100 or a stick past half makes it the console's. At start the keys show, unless a controller is connected and nothing has been pressed yet. `pc_prompts = false` never shows the keys.
+
+### Not verified
+
+- The overlay builds, its bookkeeping has a native test (`overlay_cache_test`), and the drawing (`prompt_art.h`) and the BC decoding have native tests; the pictures were drawn over the dumped PNGs and looked at. Switching devices with a texture pack loaded, and the cost of a switch in the game, were not run.
+- Which glyph of the font is which cell of the atlas is read off the picture, not off the font's data. The directional pad's pictures (the grey one and two with a red arm) and the stick pictures were not replaced: it is not known where the stick pictures are, nor which glyph is up, down, left and right.
+- Prompts the game draws some other way than from these three textures stay the console's.
+
 ## Saves, settings and logs
 
 ### Saves
@@ -504,7 +576,7 @@ Not testable here: that the bytes survive a power cut; the longer calls suggest 
 
 ### Settings
 
-`settings.toml` sits next to the program. A missing file is silent, as on first start. A broken one (a repeated key, for example) logs an `error` line with the message and the line number, is copied to `settings.toml.bad` before anything can overwrite it, and the game runs with the defaults (`tests/native/settings_file_test.cpp`). Keys include `display_mode`, `width`, `height`, `render_percent`, `aspect`, `anisotropic_filtering`, `vsync`, `fps_cap` (0 for no cap, 1 for the monitor's refresh rate, otherwise frames per second, never above `kMaxValidatedFps`; not on the options screen, and rewritten as it was in the file), `experimental_play_fps` and the `key_*` map.
+`settings.toml` sits next to the program. A missing file is silent, as on first start. A broken one (a repeated key, for example) logs an `error` line with the message and the line number, is copied to `settings.toml.bad` before anything can overwrite it, and the game runs with the defaults (`tests/native/settings_file_test.cpp`). Keys include `display_mode`, `width`, `height`, `render_percent`, `aspect`, `anisotropic_filtering`, `vsync`, `fps_cap` (0 for no cap, 1 for the monitor's refresh rate, otherwise frames per second, never above `kMaxValidatedFps`; not on the options screen, and rewritten as it was in the file), `experimental_play_fps`, `mouse_look`, `mouse_sensitivity`, `mouse_invert_x`, `mouse_invert_y`, `pc_prompts` (true) and the `key_*` map.
 
 ### Logs
 
@@ -512,7 +584,7 @@ Each start moves `batman.log` to `batman.1.log`, and so on up to `batman.4.log`;
 
 ### Input and other details
 
-- **Keyboard:** keys are read from the window's messages and applied to controller port 0 (`src/common/keyboard_pad.cpp`), only while the window has focus; losing focus releases them all. The game does not pause on losing focus (tested with focus messages, not a real Alt+Tab).
+- **Keyboard:** keys are read from the window's messages and applied to controller port 0 (`src/common/keyboard_pad.cpp`), only while the window has focus; losing focus releases them all. Mouse buttons are keys too (see "Mouse look"). The game does not pause on losing focus (tested with focus messages, not a real Alt+Tab).
 - **ACTION (B):** the B button's action is named ACTION because the game says "Interact with objects by pressing" with the second button's icon.
 - **Icon:** made at build time from the XBE's `$$XTIMAGE` section (10,240 bytes, identical to the `TitleImage.xbx` the game writes: XPR0 with DXT1 at 128x128, the bat on opaque white), with the white reaching the edges made transparent. On a dark taskbar the thin dark bat nearly vanishes at 48 px and below, so the icon uses it at 256, 128 and 64 and the save image (`$$XSIMAGE`, 64x64, the bat on grey) at 48, 32, 24 and 16. SDL takes the program's first icon for the window class, so the title bar and taskbar match.
 - **Portable folder:** `tools/make_dist.py`. The ISO copy is checked by SHA-256. A missing ISO, or one from another release, shows a message and exits with code 1. The program embeds the build machine's `.pdb` path.

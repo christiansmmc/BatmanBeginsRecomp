@@ -68,6 +68,47 @@ void ApplyKeyboard(const KeyState& keys, input::Pad& pad) {
         if (keys.Has(entry.action)) pad.analog[entry.index] = kAnalogFull;
 }
 
+uint32_t MouseButtonOfMessage(uint32_t message, uintptr_t wp, bool* down) {
+    uint32_t button = 0;
+    bool pressed = false;
+    switch (message) {
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+            pressed = true;
+            [[fallthrough]];
+        case WM_LBUTTONUP:
+            button = VK_LBUTTON;
+            break;
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONDBLCLK:
+            pressed = true;
+            [[fallthrough]];
+        case WM_RBUTTONUP:
+            button = VK_RBUTTON;
+            break;
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONDBLCLK:
+            pressed = true;
+            [[fallthrough]];
+        case WM_MBUTTONUP:
+            button = VK_MBUTTON;
+            break;
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONDBLCLK:
+            pressed = true;
+            [[fallthrough]];
+        case WM_XBUTTONUP: {
+            const uint32_t which = uint32_t((wp >> 16) & 0xFFFF);  // GET_XBUTTON_WPARAM
+            button = which == XBUTTON1 ? VK_XBUTTON1 : which == XBUTTON2 ? VK_XBUTTON2 : 0;
+            break;
+        }
+        default:
+            break;
+    }
+    if (down) *down = pressed;
+    return button;
+}
+
 void UpdateKeyState(KeyState& keys, uint32_t message, uintptr_t wp, intptr_t lp, const KeyMap& map) {
     if (message == WM_KILLFOCUS) {
         keys.held = 0;
@@ -75,6 +116,9 @@ void UpdateKeyState(KeyState& keys, uint32_t message, uintptr_t wp, intptr_t lp,
         const uint32_t key = MessageVirtualKey(wp, lp);
         for (uint32_t i = 0; i < kActionCount; i++)
             if (map.virtual_key[i] == key) keys.Set(Action(i), message == WM_KEYDOWN);
+    } else if (bool down = false; const uint32_t button = MouseButtonOfMessage(message, wp, &down)) {
+        for (uint32_t i = 0; i < kActionCount; i++)
+            if (map.virtual_key[i] == button) keys.Set(Action(i), down);
     }
 }
 

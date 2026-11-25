@@ -51,6 +51,9 @@ struct KeyState {
 
 // the key of a window message, with a modifier told apart by its scan code and extended bit
 uint32_t MessageVirtualKey(uintptr_t wp, intptr_t lp);
+// the virtual key (VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2) a mouse button message is about, 0 for any
+// other message; `down` says whether it is a press
+uint32_t MouseButtonOfMessage(uint32_t message, uintptr_t wp, bool* down);
 
 // adds the keys to the report: it is always connected afterwards, and what no key touches stays as the controller had it
 void ApplyKeyboard(const KeyState& keys, input::Pad& pad);

@@ -359,6 +359,7 @@ struct Tex {
     const Tex* swap = nullptr;  // the texture pack's image drawn in its place
     uint64_t pack_key = 0;      // its pack image is still loading
     uint32_t pack_gen = 0;      // texturedumper::Generation the key was taken at, 0 after new bytes
+    uint32_t overlay_gen = 0;   // texturedumper::OverlayGeneration last seen
 };
 
 struct PsoKey {
@@ -574,6 +575,7 @@ private:
     void LatchPackImage(Tex& tx);
     void CreatePackTexture(Tex& r, const texturedumper::Image& img);
     void ReleasePackTextures();
+    void ReleasePackTexture(uint64_t key);
     void EnsurePixelShader(const PixelKey& pk, DrawShaders& sh);
     void BuildPipelineKey(const State& s, const Assembled& a, uint64_t vh, uint64_t ph, PsoKey& k);
     void KeyDepthStencil(const State& s, const Assembled& a, PsoKey& k);
@@ -2061,6 +2063,12 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const 
             tx.pack_gen = 0;
         }
     }
+    // the overlay's picture changed: a texture of a size it draws over looks its picture up again, so none keeps drawing a
+    // copy ReleasePackTexture let go of
+    if (tx.overlay_gen != texturedumper::OverlayGeneration()) {
+        tx.overlay_gen = texturedumper::OverlayGeneration();
+        if (texturedumper::OverlaySize(d.width, d.height)) tx.pack_gen = 0;
+    }
     if (tx.pack_gen != texturedumper::Generation()) LatchPackKey(tx, d, fi, colours);
     if (tx.pack_key) LatchPackImage(tx);
     const Tex& drawn = tx.swap ? *tx.swap : tx;
@@ -2079,6 +2087,8 @@ void D3D12Backend::LatchPackKey(Tex& tx, const TextureDesc& d, const FormatInfo&
     texturedumper::Dump(key, d, p, colours);
     // dumping alone keys the bytes too: the pack image is not drawn then
     tx.pack_key = texturedumper::Replacing() ? key : 0;
+    // a picture the game makes from these bytes (the key prompts) is drawn in their place the same way
+    if (texturedumper::MakeOverlay(key, d, p, colours)) tx.pack_key = key;
 }
 
 // the pack image for tx's bytes once it has loaded; textures with the same bytes share its GPU copy
@@ -2120,6 +2130,15 @@ void D3D12Backend::CreatePackTexture(Tex& r, const texturedumper::Image& img) {
 void D3D12Backend::ReleasePackTextures() {
     for (auto& entry : pack_textures_) CurrentFrame().garbage.push_back(entry.second.res);
     pack_textures_.clear();
+}
+
+// one of the overlay's pictures is stale; OverlayGeneration moved on, so the textures of its size let go of it before they
+// draw, and the pack's own images stay
+void D3D12Backend::ReleasePackTexture(uint64_t key) {
+    auto it = pack_textures_.find(key);
+    if (it == pack_textures_.end()) return;
+    CurrentFrame().garbage.push_back(it->second.res);
+    pack_textures_.erase(it);
 }
 
 ID3D12Resource* D3D12Backend::BindTexture(const State& s, int stage, DrawTextures& stages) {
@@ -3698,6 +3717,7 @@ void D3D12Backend::WaitGpuFrame(uint64_t n) {
 
 void D3D12Backend::ApplySettings() {
     if (texturedumper::Update()) ReleasePackTextures();
+    for (uint64_t key : texturedumper::StaleOverlays()) ReleasePackTexture(key);
     float want = app::RenderScale(guest_h_);
     bool remake = ext_ && ext_->Settings();
     if (std::fabs(want - scale_) > 1e-4f || remake) {

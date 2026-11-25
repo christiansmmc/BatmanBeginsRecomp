@@ -151,6 +151,40 @@ void TestOnlyTheLeftModifiersCount() {
     CHECK(keys.held == 0);
 }
 
+// the mouse's buttons are keys: 1, 2, 4, 5 and 6 as the key map has them
+void TestMouseButtons() {
+    constexpr uint32_t kLeftDown = 0x0201, kLeftUp = 0x0202, kRightDown = 0x0204, kMiddleUp = 0x0208, kXDown = 0x020B,
+                       kXUp = 0x020C, kMove = 0x0200;
+    bool down = true;
+    CHECK(MouseButtonOfMessage(kLeftDown, 0, &down) == 1 && down);
+    CHECK(MouseButtonOfMessage(kLeftUp, 0, &down) == 1 && !down);
+    CHECK(MouseButtonOfMessage(kRightDown, 0, &down) == 2 && down);
+    CHECK(MouseButtonOfMessage(kMiddleUp, 0, &down) == 4 && !down);
+    CHECK(MouseButtonOfMessage(kXDown, uintptr_t(1) << 16, &down) == 5 && down);
+    CHECK(MouseButtonOfMessage(kXUp, uintptr_t(2) << 16, &down) == 6 && !down);
+    CHECK(MouseButtonOfMessage(kXDown, uintptr_t(3) << 16, &down) == 0);  // no such button
+    CHECK(MouseButtonOfMessage(kMove, 0, &down) == 0 && !down);
+    CHECK(MouseButtonOfMessage(kKeyDownMessage, 'E', nullptr) == 0);
+
+    KeyMap map = kDefaultKeyMap;
+    map[Action::Punch] = 1;  // the left button
+    map[Action::Kick] = 5;   // the first side button
+    KeyState keys;
+    UpdateKeyState(keys, kLeftDown, 0, 0, map);
+    CHECK(keys.Has(Action::Punch) && !keys.Has(Action::Kick));
+    UpdateKeyState(keys, kXDown, uintptr_t(1) << 16, 0, map);
+    CHECK(keys.Has(Action::Punch) && keys.Has(Action::Kick));
+    UpdateKeyState(keys, kLeftUp, 0, 0, map);
+    CHECK(!keys.Has(Action::Punch) && keys.Has(Action::Kick));
+    UpdateKeyState(keys, kKillFocusMessage, 0, 0, map);  // the mouse given back lets go of the buttons too
+    CHECK(keys.held == 0);
+
+    // a button nothing is bound to does nothing
+    KeyState none;
+    UpdateKeyState(none, kRightDown, 0, 0, map);
+    CHECK(none.held == 0);
+}
+
 void TestLosingFocusReleasesEveryKey() {
     KeyState keys = Held({Action::MoveForward, Action::Jump, Action::LeftTrigger});
     UpdateKeyState(keys, kKillFocusMessage, 0, 0);
@@ -169,5 +203,6 @@ int main() {
     TestKeyMessages();
     TestOnlyTheLeftModifiersCount();
     TestLosingFocusReleasesEveryKey();
+    TestMouseButtons();
     return g_failures;
 }

@@ -10,6 +10,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <utility>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -27,6 +28,7 @@
 #include "app/app.h"
 #include "common/fps_policy.h"
 #include "common/keyboard_pad.h"
+#include "common/mouse_look.h"
 #include "common/movie_skip.h"
 #include "common/options_model.h"
 #include "core/input.h"
@@ -298,7 +300,8 @@ void PadButton(float x, float y, ImU32 light, ImU32 mid, ImU32 dark, const char*
 
 // ---- the screen's state, under app::UiLock ----
 
-enum class Tab { Video, Keyboard };
+enum class Tab { Video, Keyboard, Mouse };
+enum MouseRow { kMouseInvertX, kMouseInvertY, kMouseRows };
 enum VideoRow { kRowMode, kRowSize, kRowScale, kRowAspect, kRowFilter, kRowVsync, kRowFrameRate, kVideoRows };
 enum class Device { Keyboard, Controller };
 
@@ -342,15 +345,18 @@ constexpr int kKeyRowCount = int(std::size(kKeyRows));
 struct KeyEvent {
     uint32_t virtual_key;
     bool repeat;
+    bool from_mouse = false;  // a mouse button chosen for a key row
 };
 
 struct ScreenState {
     bool open = false;
     Tab tab = Tab::Video;
     int video_row = kRowScale;
+    int mouse_row = kMouseInvertX;
     int key_row = 0;
     int key_top = 0;  // the first key row shown
     bool capturing = false;
+    bool skip_click = false;  // a mouse button just chosen for a key row is not also a click on the row under it
     Device device = Device::Keyboard;
     std::deque<KeyEvent> key_events;
     Chord open_chord, accept, back, previous_tab, next_tab;
@@ -506,19 +512,31 @@ void MoveKeyRow(int delta) {
     if (ui.key_row >= ui.key_top + kVisibleRows) ui.key_top = ui.key_row - kVisibleRows + 1;
 }
 
+void ToggleMouseRow(int row) {
+    if (row == kMouseInvertX) mouse::SetInvertX(!mouse::InvertX());
+    else if (row == kMouseInvertY) mouse::SetInvertY(!mouse::InvertY());
+    else return;
+    app::Save();
+}
+
 void MoveRow(int delta) {
     ScreenState& ui = g_screen;
     if (ui.tab == Tab::Video) ui.video_row = ((ui.video_row + delta) % kVideoRows + kVideoRows) % kVideoRows;
+    else if (ui.tab == Tab::Mouse) ui.mouse_row = ((ui.mouse_row + delta) % kMouseRows + kMouseRows) % kMouseRows;
     else MoveKeyRow(delta);
 }
 
 void ChangeSelected(int delta) {
     ScreenState& ui = g_screen;
     if (ui.tab == Tab::Video) ChangeValue(ui.video_row, delta);
+    else if (ui.tab == Tab::Mouse) ToggleMouseRow(ui.mouse_row);
     else if (delta > 0) ui.capturing = true;
 }
 
-void SwitchTab() { g_screen.tab = g_screen.tab == Tab::Video ? Tab::Keyboard : Tab::Video; }
+void SwitchTab(int direction = 1) {
+    const int count = 3;
+    g_screen.tab = static_cast<Tab>((static_cast<int>(g_screen.tab) + direction + count) % count);
+}
 
 // ---- input ----
 
@@ -536,6 +554,7 @@ void HandleKeyEvent(const KeyEvent& event) {
         if (RebindKey(map, kKeyRows[ui.key_row].action, event.virtual_key)) {
             SetWindowKeyMap(map);
             ui.capturing = false;
+            ui.skip_click = event.from_mouse;
             app::Save();
         }
         return;
@@ -548,8 +567,8 @@ void HandleKeyEvent(const KeyEvent& event) {
     switch (event.virtual_key) {
         case VK_UP: MoveRow(-1); break;
         case VK_DOWN: MoveRow(1); break;
-        case VK_LEFT: if (ui.tab == Tab::Video) ChangeSelected(-1); break;
-        case VK_RIGHT: if (ui.tab == Tab::Video) ChangeSelected(1); break;
+        case VK_LEFT: if (ui.tab != Tab::Keyboard) ChangeSelected(-1); break;
+        case VK_RIGHT: if (ui.tab != Tab::Keyboard) ChangeSelected(1); break;
         case VK_RETURN:
         case VK_SPACE: if (!event.repeat) ChangeSelected(1); break;
         case VK_TAB: if (!event.repeat) SwitchTab(); break;
@@ -586,10 +605,11 @@ void HandleController(double seconds) {
         ToggleScreen();
         return;
     }
-    if (previous_started || next_started) SwitchTab();
+    if (previous_started) SwitchTab(-1);
+    if (next_started) SwitchTab(1);
     if (go_up) MoveRow(-1);
     if (go_down) MoveRow(1);
-    if (ui.tab == Tab::Video) {
+    if (ui.tab != Tab::Keyboard) {
         if (go_left) ChangeSelected(-1);
         if (go_right) ChangeSelected(1);
     }
@@ -610,17 +630,19 @@ bool MouseIsForThisWindow() {
 void HandleMouse() {
     ScreenState& ui = g_screen;
     const ImGuiIO& io = ImGui::GetIO();
+    const bool click_is_a_key = std::exchange(ui.skip_click, false);
     if (!MouseIsForThisWindow()) return;
     const ImVec2 mouse = io.MousePos;
     const float x = (mouse.x - g_canvas.left) / g_canvas.scale, y = (mouse.y - g_canvas.top) / g_canvas.scale;
     const bool moved = mouse.x != ui.last_mouse.x || mouse.y != ui.last_mouse.y;
     ui.last_mouse = mouse;
-    const bool clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const bool clicked = !click_is_a_key && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     if (ui.capturing) return;
 
     const auto over_tab = [&](float top) { return x >= 30.0f && x <= 322.0f && y >= top && y <= top + 44.0f; };
-    if (clicked && over_tab(kRowsTop) && ui.tab != Tab::Video) SwitchTab();
-    if (clicked && over_tab(kRowsTop + kRowHeight) && ui.tab != Tab::Keyboard) SwitchTab();
+    if (clicked && over_tab(kRowsTop)) ui.tab = Tab::Video;
+    if (clicked && over_tab(kRowsTop + kRowHeight)) ui.tab = Tab::Keyboard;
+    if (clicked && over_tab(kRowsTop + 2 * kRowHeight)) ui.tab = Tab::Mouse;
 
     if (ui.tab == Tab::Keyboard && io.MouseWheel != 0.0f) {
         ui.key_top = std::clamp(ui.key_top - int(std::lround(io.MouseWheel)), 0, kKeyRowCount - kVisibleRows);
@@ -637,6 +659,10 @@ void HandleMouse() {
             if (x >= kArrowLeft - kArrowMargin && x <= kArrowLeft + kArrowWidth + kArrowMargin) ChangeValue(shown, -1);
             if (x >= kArrowRight - kArrowMargin && x <= kArrowRight + kArrowWidth + kArrowMargin) ChangeValue(shown, 1);
         }
+    } else if (ui.tab == Tab::Mouse) {
+        if (shown >= kMouseRows) return;
+        if (moved) ui.mouse_row = shown;
+        if (clicked) { ui.mouse_row = shown; ToggleMouseRow(shown); }
     } else {
         if (shown >= kVisibleRows) return;
         const int row = ui.key_top + shown;
@@ -800,6 +826,22 @@ void DrawVideoRows() {
     }
 }
 
+void DrawMouseRows() {
+    const ScreenState& ui = g_screen;
+    constexpr const char* labels[kMouseRows] = {"INVERT HORIZONTAL (X)", "INVERT VERTICAL (Y)"};
+    for (int row = 0; row < kMouseRows; ++row) {
+        const bool selected = row == ui.mouse_row;
+        const float top = kRowsTop + float(row) * kRowHeight;
+        DrawRowBase(row, selected, row == kMouseRows - 1);
+        Text(g_body, 17.0f, 344.0f, top, kRowHeight, selected ? kBright : kGold, labels[row], 0.05f);
+        const bool checked = row == kMouseInvertX ? mouse::InvertX() : mouse::InvertY();
+        const float left = 898.0f, y = top + 14.0f;
+        Rect(left, y, left + 24.0f, y + 24.0f, kGold);
+        Rect(left + 2.0f, y + 2.0f, left + 22.0f, y + 22.0f, Rgb(0x101512));
+        if (checked) Text(g_body, 17.0f, left + 3.0f, y - 14.0f, 52.0f, kBright, "X", 0.0f);
+    }
+}
+
 void DrawKeyRows() {
     const ScreenState& ui = g_screen;
     const KeyMap map = WindowKeyMap();
@@ -876,6 +918,7 @@ void DrawScreenBody() {
     TextCentred(g_small, 13.0f, 812.0f, 79.0f, 38.0f, kGold, "BATMAN BEGINS", 0.24f);
 
     if (ui.tab == Tab::Video) DrawVideoRows();
+    else if (ui.tab == Tab::Mouse) DrawMouseRows();
     else DrawKeyRows();
 
     // over the rows: a selected row runs the band's whole width
@@ -886,9 +929,11 @@ void DrawScreenBody() {
     };
     tab(192.0f, ui.tab == Tab::Video, "VIDEO");
     tab(244.0f, ui.tab == Tab::Keyboard, "KEYBOARD");
+    tab(296.0f, ui.tab == Tab::Mouse, "MOUSE");
 
     Plate(544.0f, 580.0f, 38.0f, 1262.0f, 38.0f, kPlate, plate_stops, 5.0f, plate_line, 1.4f);
-    const char* description = ui.tab == Tab::Video ? DescriptionOf(ui.video_row)
+    const char* description = ui.tab == Tab::Mouse ? "Invert mouse movement on each axis. Changes apply immediately."
+                              : ui.tab == Tab::Video ? DescriptionOf(ui.video_row)
                               : ui.capturing       ? "Press the key for this action."
                                                    : "Press to change this command's key. A key already in use swaps places.";
     Text(g_description, 18.0f, 604.0f, 542.0f, 38.0f, kDescription, description, 0.012f);
@@ -952,10 +997,18 @@ void DrawScreen() {
 }
 
 void OnWindowMessage(uint32_t message, uintptr_t wp, intptr_t lp) {
-    if (message != WM_KEYDOWN) return;
     constexpr intptr_t kRepeatBit = intptr_t(1) << 30;
+    if (message == WM_KEYDOWN) {
+        std::lock_guard lock(app::UiLock());
+        g_screen.key_events.push_back({MessageVirtualKey(wp, lp), (lp & kRepeatBit) != 0});
+        return;
+    }
+    // a mouse button is a key for a row waiting for one; otherwise it is the mouse's, for the screen and the game
+    bool down = false;
+    const uint32_t button = MouseButtonOfMessage(message, wp, &down);
+    if (!button || !down) return;
     std::lock_guard lock(app::UiLock());
-    g_screen.key_events.push_back({MessageVirtualKey(wp, lp), (lp & kRepeatBit) != 0});
+    if (g_screen.capturing) g_screen.key_events.push_back({button, false, true});
 }
 
 void SeeController(int port, const input::Pad& pad) {

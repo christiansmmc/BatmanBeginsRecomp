@@ -134,6 +134,11 @@ void TestKeyNames() {
     CHECK(KeyName(0x25) == "LEFT");
     CHECK(KeyName(0x27) == "RIGHT");
     CHECK(KeyName(0xA0) == "LEFT SHIFT");
+    CHECK(KeyName(0x01) == "LEFT MOUSE");
+    CHECK(KeyName(0x02) == "RIGHT MOUSE");
+    CHECK(KeyName(0x04) == "MIDDLE MOUSE");
+    CHECK(KeyName(0x05) == "MOUSE 4");
+    CHECK(KeyName(0x06) == "MOUSE 5");
     CHECK(KeyName(0xA1) == "RIGHT SHIFT");
     CHECK(KeyName(0xA2) == "LEFT CTRL");
     CHECK(KeyName(0xA3) == "RIGHT CTRL");

@@ -27,9 +27,13 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "app/app.h"
 #include "core/log.h"
+#include "gpu/bc_decode.h"
+#include "gpu/overlay_cache.h"
 #include "gpu/shaders.h"
 
 using Microsoft::WRL::ComPtr;
@@ -76,6 +80,9 @@ struct Pack {
     std::unordered_set<uint64_t> asked;
     std::unordered_map<uint64_t, std::optional<Image>> loaded;  // empty: the file did not load
     std::unordered_set<uint64_t> dumped;
+    // the overlay's, the render thread's alone
+    Overlay overlay{};
+    OverlayCache<Image> made;
 };
 
 Pack g;
@@ -546,15 +553,27 @@ bool Update() {
     bool changed = LatchSettings();
     bool reloaded = g.set.replacing && UpdatePackFiles();
     if (changed || reloaded) g.generation++;
+    if (reloaded) g.made.Forget();  // every GPU copy goes, the overlay's too
+    // A new revision lets go of the overlay's own pictures only (StaleOverlays). Dropping every pack image would lose
+    // them: a loaded image is handed out once, and its key stays asked until the pack is listed again.
+    if (g.overlay.revision) g.made.Latch(g.overlay.revision());
     return reloaded;
 }
 
+void SetOverlay(const Overlay& overlay) { g.overlay = overlay; }
+
+bool OverlaySize(uint32_t width, uint32_t height) { return g.overlay.wants_size && g.overlay.wants_size(width, height); }
+
 uint32_t Generation() { return g.generation; }
+
+uint32_t OverlayGeneration() { return g.made.Generation(); }
+
+std::vector<uint64_t> StaleOverlays() { return g.made.TakeStale(); }
 
 bool Replacing() { return g.set.replacing && !g.files.empty(); }
 
 uint64_t Key(const TextureDesc& d, const FormatInfo& fi, const uint8_t* guest, const uint32_t* palette) {
-    if (!Replacing() && !g.set.dumping) return 0;
+    if (!Replacing() && !g.set.dumping && !OverlaySize(d.width, d.height)) return 0;
     // cube maps, volumes and depth stay the console's; linear ones are movie frames and the game's own copies
     if (d.cube || d.depth > 1 || d.linear || UploadFormat(fi.host) == DXGI_FORMAT_UNKNOWN) return 0;
     uint32_t shape[] = {d.format, d.width, d.height};
@@ -580,9 +599,54 @@ void Dump(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32
     });
 }
 
+bool MakeOverlay(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {
+    if (!key || !g.overlay.paint || !g.overlay.paints || !g.overlay.paints(key, d.width, d.height)) return false;
+    if (g.set.replacing && g.files.count(key)) return false;  // the pack's own image
+    // painted already for what the overlay shows now: a device switched back and forth costs no painting
+    if (g.made.Has(key)) return true;
+    // the revision as paint sees it: it may have moved on since Update, and then the picture serves after the next one
+    const uint32_t revision = g.overlay.revision ? g.overlay.revision() : 0;
+    const Image console = Decode(d, guest, palette);
+    if (console.levels.empty()) return false;
+    const Level& top = console.levels[0];
+    std::vector<uint8_t> bgra;
+    switch (console.format) {
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+            bgra.resize(size_t(d.width) * d.height * 4);
+            for (uint32_t y = 0; y < d.height; y++) {
+                std::memcpy(&bgra[size_t(y) * d.width * 4], &top.px[size_t(y) * top.pitch], size_t(d.width) * 4);
+            }
+            break;
+        case DXGI_FORMAT_BC1_UNORM: bgra = DecodeBcToBgra(Bc::Bc1, d.width, d.height, top.px.data()); break;
+        case DXGI_FORMAT_BC2_UNORM: bgra = DecodeBcToBgra(Bc::Bc2, d.width, d.height, top.px.data()); break;
+        case DXGI_FORMAT_BC3_UNORM: bgra = DecodeBcToBgra(Bc::Bc3, d.width, d.height, top.px.data()); break;
+        default: return false;
+    }
+    uint32_t width = d.width, height = d.height;
+    if (!g.overlay.paint(key, width, height, bgra) || !width || !height || width > kMaxSide || height > kMaxSide ||
+        bgra.size() != size_t(width) * height * 4) {
+        return false;
+    }
+    Image img;
+    img.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    img.width = width;
+    img.height = height;
+    img.levels.push_back({std::move(bgra), width * 4});
+    AddMipmaps(img);
+    g.made.Put(key, revision, std::move(img));
+    return g.made.Has(key);
+}
+
 Lookup Take(uint64_t key, Image& out) {
     auto file = g.files.find(key);
-    if (!g.set.replacing || file == g.files.end()) return Lookup::None;
+    if (!g.set.replacing || file == g.files.end()) {
+        // only a picture for the current revision: one kept from another (the keyboard's, while the controller is in use)
+        // is not drawn
+        const Image* made = g.made.Hand(key);
+        if (!made) return Lookup::None;
+        out = *made;  // a copy: the picture is kept for the next time this revision comes back
+        return Lookup::Ready;
+    }
     uint32_t revision = 0;
     {
         std::lock_guard l(g.lock);
