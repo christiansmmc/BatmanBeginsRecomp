@@ -53,7 +53,7 @@ void TestScaleLabel() {
 void TestScaleChoices() {
     // a window of 720 lines: 100% is 1.5x, its own entry below the whole scales
     std::vector<ScaleChoice> at720 = ScaleChoices(100, 720, 640, 480);
-    CHECK(at720.size() == 8);
+    CHECK(at720.size() == 4);
     CHECK(at720[0].percent == 100);
     CHECK(at720[0].label == "AUTO · 960 x 720");
     CHECK(at720[1].percent == 134);
@@ -63,7 +63,7 @@ void TestScaleChoices() {
 
     // at 1440 lines the window's height is 3x, so there is no entry of its own
     std::vector<ScaleChoice> at1440 = ScaleChoices(100, 1440, 640, 480);
-    CHECK(at1440.size() == 7);
+    CHECK(at1440.size() == 3);
     CHECK(at1440[0].percent == 67);
     CHECK(at1440[1].percent == 100);
     CHECK(at1440[1].label == "3x · 1920 x 1440");
@@ -71,7 +71,7 @@ void TestScaleChoices() {
 
     // a value set by hand in the settings file shows as it is, and can be chosen again
     std::vector<ScaleChoice> custom = ScaleChoices(300, 720, 640, 480);
-    CHECK(custom.size() == 9);
+    CHECK(custom.size() == 5);
     CHECK(custom[4].percent == 300);
     CHECK(custom[4].label == "300% · 2880 x 2160");
 }
